@@ -116,8 +116,9 @@ def inject_css():
             margin-bottom: 1rem;
         }
         .rw-hero-icon-circle {
+            top: 40px;
             width: 40px;
-            height: 80px;
+            height: 40px;
             border-radius: 999px;
             background: #111111;
             display: flex;
@@ -254,12 +255,12 @@ def render_home():
     st.markdown('<hr class="rw-divider">', unsafe_allow_html=True)
 
     # Bottom row: logo – contact – logo, all centered with similar heights
-    col_left, col_center= st.columns([1, 1])
+    col_left, col_center= st.columns([.1, .1])
 
     with col_left:
         if os.path.exists(logo_path):
             try:
-                st.image(crop_and_fit_image(logo_path, 160), use_column_width=False)
+                st.image(crop_and_fit_image(logo_path, 80), use_column_width=False)
             except Exception:
                 pass
 
@@ -627,6 +628,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
