@@ -1,5 +1,6 @@
 import os
 import io
+import json
 
 import streamlit as st
 from PIL import Image
@@ -28,320 +29,290 @@ def crop_and_fit_image(image_path, height):
     return image.resize((width, height), Image.LANCZOS)
 
 
-def go_to_page(page_name: str):
-    st.session_state["page"] = page_name
-    # keep query params in sync so header links work nicely
-    try:
-        # Newer Streamlit (st.query_params)
-        qp = st.query_params
-        qp["page"] = page_name
-        st.query_params = qp
-    except Exception:
-        # Fallback for older versions
-        try:
-            st.experimental_set_query_params(page=page_name)
-        except Exception:
-            pass
-    st.experimental_rerun()
-
-
 # -----------------------
-# Sticky header
+# Global styling
 # -----------------------
 
-def render_header():
-    script_dir = get_script_dir()
-    small_logo = os.path.join(script_dir, "logo.png")
-
+def inject_css():
     st.markdown(
         """
         <style>
-        /* Sticky header bar */
-        .rr-header {
-            position: fixed;
-            top: 50px;
-            left: 0;
-            right: 0;
-            height: 60px;
-            background: #111111;
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 3rem;
-            z-index: 1000;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-        }
-
-        .rr-header-left {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            font-size: 0.9rem;
-        }
-
-        .rr-logo-box {
-            width: 32px;
-            height: 32px;
-            border-radius: 6px;
-            background: #000000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            font-size: 1rem;
-        }
-
-        .rr-header-right {
-            display: flex;
-            align-items: center;
-            gap: 1.5rem;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            font-weight: 600;
-        }
-
-        .rr-header-right a {
-            color: #ffffff;
-            text-decoration: none;
-        }
-
-        .rr-header-right a:hover {
-            text-decoration: underline;
-        }
-
-        .rr-header-cta {
-            padding: 0.4rem 1rem;
-            background: #ffffff;
-            color: #111111 !important;
-            border-radius: 999px;
-            font-weight: 700;
-        }
-
-        /* Push main content down so it isn't hidden under fixed header */
-        .block-container {
-            padding-top: 80px !important;
-        }
-
-        /* Background + home layout */
+        /* App background + typography */
         .stApp {
-            background: radial-gradient(circle at top left, #f5fff7, #eaf4ff 40%, #f7f7ff 80%);
+            background: radial-gradient(circle at top left, #f4fff7, #eaf4ff 45%, #f9f9ff 90%);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
-        .rootrott-main {
-            max-width: 1100px;
-            margin: 0 auto;
+        /* Main content width */
+        .block-container {
+            max-width: 1150px;
+            padding-top: 2rem;
             padding-bottom: 3rem;
         }
 
-        .rootrott-hero-title {
-            font-size: 3rem;
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {
+            background: #111827;
+            color: #e5e7eb;
+        }
+        [data-testid="stSidebar"] h1, 
+        [data-testid="stSidebar"] h2, 
+        [data-testid="stSidebar"] h3 {
+            color: #f9fafb;
+        }
+
+        .rw-sidebar-title {
+            font-size: 1.2rem;
             font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #f9fafb;
             margin-bottom: 0.25rem;
-            letter-spacing: 0.02em;
+        }
+        .rw-sidebar-subtitle {
+            font-size: 0.8rem;
+            color: #9ca3af;
+            margin-bottom: 1rem;
         }
 
-        .rootrott-hero-subtitle {
-            font-size: 1.1rem;
-            color: #4b5563;
-            margin-bottom: 2rem;
-        }
-
-        .rootrott-card {
-            background: rgba(255, 255, 255, 0.95);
+        /* Card-style boxes */
+        .rw-card {
+            background: rgba(255, 255, 255, 0.98);
             border-radius: 18px;
-            padding: 1.1rem 1.2rem;
+            padding: 1.3rem 1.4rem;
             box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
             border: 1px solid rgba(148, 163, 184, 0.2);
-            height: 100%;
+            margin-bottom: 1.3rem;
         }
 
-        .rootrott-card h4 {
-            margin: 0 0 0.4rem 0;
-            font-size: 1.05rem;
-            font-weight: 700;
+        .rw-card h3 {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
         }
 
-        .rootrott-card p {
-            font-size: 0.95rem;
-            color: #4b5563;
-            margin: 0 0 0.8rem 0;
+        .rw-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.1);
+            color: #047857;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
         }
 
-        .rootrott-card-button button {
-            width: 100% !important;
-            border-radius: 999px !important;
-            font-weight: 600 !important;
-        }
-
-        .rootrott-footer {
-            margin-top: 3rem;
-            padding-top: 1.5rem;
-            border-top: 1px dashed rgba(148, 163, 184, 0.6);
+        .rw-stat-label {
             font-size: 0.8rem;
             color: #6b7280;
+        }
+        .rw-stat-value {
+            font-size: 1.4rem;
+            font-weight: 700;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    logo_text = "RR"
-    if os.path.exists(small_logo):
-        # could turn this into an <img> instead, but simple text works well
-        logo_text = "RR"
 
+# -----------------------
+# Sidebar navigation
+# -----------------------
+
+def sidebar_nav():
+    script_dir = get_script_dir()
+    logo_path = os.path.join(script_dir, "logo.png")
+
+    with st.sidebar:
+        # Logo + title
+        cols = st.columns([1, 3])
+        with cols[0]:
+            if os.path.exists(logo_path):
+                logo_img = Image.open(logo_path).resize((60, 60), Image.LANCZOS)
+                st.image(logo_img, use_column_width=True)
+        with cols[1]:
+            st.markdown('<div class="rw-sidebar-title">ROOTWEILER</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="rw-sidebar-subtitle">Digital sidekick for greenhouse teams.</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("---")
+
+        section = st.radio(
+            "Sections",
+            [
+                "Home",
+                "Calculators",
+                "Climate",
+                "Phenotyping",
+                "Data & Graphs",
+                "Imaging",
+            ],
+            index=0,
+        )
+
+        st.markdown("---")
+        st.caption("Tip: All processing happens in the cloud. No local installs needed.")
+
+    return section
+
+
+# -----------------------
+# Section: Home
+# -----------------------
+
+def render_home():
+    script_dir = get_script_dir()
+    enza_path = os.path.join(script_dir, "enza.png")
+    cea_path = os.path.join(script_dir, "cea.png")
+
+    # Hero
+    col1, col2 = st.columns([1.1, 1.6])
+    with col1:
+        st.markdown("### Rootweiler")
+        st.markdown(
+            "_A support tool for greenhouse growers, plant breeders, and agronomists._"
+        )
+        st.markdown(
+            """
+            Rootweiler helps you turn messy imaging and trial files into **clean, usable data**.
+
+            - 🧾 Extract images straight from reports & slide decks  
+            - 🌿 Measure leaf size and structure at scale  
+            - 📊 Generate clean plots for updates & presentations  
+            - 🧪 Debug segmentation settings for new cultivars and lighting setups  
+            """
+        )
+
+    with col2:
+        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
+        st.markdown('<span class="rw-pill">Greenhouse support</span>', unsafe_allow_html=True)
+        st.markdown("#### Why Rootweiler?")
+        st.markdown(
+            """
+            Greenhouse teams juggle **crop care, imaging, and reporting** under pressure.
+            Rootweiler takes care of the digital grunt work so you can spend more time in the crop,
+            less time in Excel.
+
+            - Central place to try tools  
+            - Simple enough for technicians  
+            - Flexible enough for data scientists  
+            """
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Quick stats / use cases
+    st.markdown("#### Designed for your team")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
+        st.markdown("**Growers**", unsafe_allow_html=False)
+        st.markdown(
+            "- Check leaf size distributions\n- Compare blocks or recipes\n- Document issues with images"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with c2:
+        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
+        st.markdown("**Breeders**")
+        st.markdown(
+            "- Measure traits across trials\n- Export clean phenotype tables\n- Standardize imaging workflows"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with c3:
+        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
+        st.markdown("**Agronomists & R&D**")
+        st.markdown(
+            "- Explore responses vs climate\n- Build internal protocols\n- Share reproducible visuals"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Partners / footer
+    st.markdown("#### Partner logos")
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        if os.path.exists(enza_path):
+            try:
+                st.image(crop_and_fit_image(enza_path, 55), caption="Enza Zaden")
+            except Exception as e:
+                st.write(f"Error loading enza.png: {e}")
+    with fc2:
+        st.write("")
+    with fc3:
+        if os.path.exists(cea_path):
+            try:
+                st.image(crop_and_fit_image(cea_path, 40), caption="CEA Seed")
+            except Exception as e:
+                st.write(f"Error loading cea.png: {e}")
+
+    st.caption("This is an early prototype. Tools and UX will evolve with real grower feedback.")
+
+
+# -----------------------
+# Section: Calculators (placeholder)
+# -----------------------
+
+def render_calculators():
+    st.markdown("### Calculators")
     st.markdown(
-        f"""
-        <div class="rr-header">
-            <div class="rr-header-left">
-                <div class="rr-logo-box">{logo_text}</div>
-                <div>RootRott.io</div>
-            </div>
-            <div class="rr-header-right">
-                <a href="?page=main">Home</a>
-                <a href="?page=extractor">Extractor</a>
-                <a href="?page=leaf_analysis">Leaf Analysis</a>
-                <a href="?page=boxing">Box Plot</a>
-                <a href="?page=debugger">Debug</a>
-                <a class="rr-header-cta" href="?page=main#contact">Contact</a>
-            </div>
-        </div>
+        """
+        This section will host quick calculators relevant to greenhouse operations, for example:
+
+        - 🌞 Daily Light Integral (DLI)  
+        - 🌡 Growing Degree Days (GDD)  
+        - 📦 Yield per m² projections  
+
+        For now, this area is a **placeholder** while we focus on imaging and phenotyping.
         """,
-        unsafe_allow_html=True,
+    )
+    st.info("If you have specific calculators in mind, jot them down and we can design around that.")
+
+
+# -----------------------
+# Section: Climate (placeholder)
+# -----------------------
+
+def render_climate():
+    st.markdown("### Climate")
+    st.markdown(
+        """
+        In a future iteration, the Climate area could:
+
+        - Pull climate exports (e.g. from Priva, Hoogendoorn, Argus)  
+        - Aggregate them per zone / recipe / experiment  
+        - Link climate patterns to phenotyping outputs  
+
+        Right now, no tools are wired here yet — think of this as a **reserved space** for future growth.
+        """
     )
 
 
 # -----------------------
-# Pages
+# Section: Imaging (Extractor)
 # -----------------------
 
-def show_main_interface():
-    script_dir = get_script_dir()
-    logo_path = os.path.join(script_dir, "logo.png")
-    enza_path = os.path.join(script_dir, "enza.png")
-    cea_path = os.path.join(script_dir, "cea.png")
+def render_imaging():
+    st.markdown("### Imaging")
+    st.markdown(
+        """
+        Use Imaging tools when you want to **pull images out of existing files**  
+        like trial reports, slide decks, or Excel files.
+        """
+    )
 
-    st.markdown('<div class="rootrott-main">', unsafe_allow_html=True)
+    tab_extractor, = st.tabs(["Image Extractor"])
 
-    # Hero section
-    col_logo, col_text = st.columns([1, 2])
-    with col_logo:
-        if os.path.exists(logo_path):
-            logo_image = Image.open(logo_path).resize((260, 260), Image.LANCZOS)
-            st.image(logo_image, use_column_width=False)
-
-    with col_text:
-        st.markdown('<div class="rootrott-hero-title">RootRott.io</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="rootrott-hero-subtitle">'
-            "Leaf imaging tools for controlled environment agriculture.<br>"
-            "Upload your files, analyze your plants, and export results in seconds."
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("#### Tools")
-
-    row1 = st.columns(2)
-    row2 = st.columns(2)
-
-    # Extractor card
-    with row1[0]:
-        st.markdown(
-            """
-            <div class="rootrott-card">
-                <h4>🧾 Extractor</h4>
-                <p>Pull images directly from PDF, Word, PowerPoint, and Excel files for further analysis or archiving.</p>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown('<div class="rootrott-card-button">', unsafe_allow_html=True)
-        if st.button("Open Extractor", key="home_extractor"):
-            go_to_page("extractor")
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
-    # Leaf Analysis card
-    with row1[1]:
-        st.markdown(
-            """
-            <div class="rootrott-card">
-                <h4>🌿 Leaf Analysis</h4>
-                <p>Measure leaf size from images and export structured Excel reports for your trials.</p>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown('<div class="rootrott-card-button">', unsafe_allow_html=True)
-        if st.button("Open Leaf Analysis", key="home_leaf"):
-            go_to_page("leaf_analysis")
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
-    # Box Plot card
-    with row2[0]:
-        st.markdown(
-            """
-            <div class="rootrott-card">
-                <h4>📊 Box Plot</h4>
-                <p>Create publication-ready box plots from your Excel datasets with custom ordering and styling.</p>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown('<div class="rootrott-card-button">', unsafe_allow_html=True)
-        if st.button("Open Box Plot", key="home_box"):
-            go_to_page("boxing")
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
-    # Debugger card
-    with row2[1]:
-        st.markdown(
-            """
-            <div class="rootrott-card">
-                <h4>🧪 Debugger</h4>
-                <p>Visualize segmentation steps and tune HSV & watershed parameters for new cultivars and lighting setups.</p>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown('<div class="rootrott-card-button">', unsafe_allow_html=True)
-        if st.button("Open Debugger", key="home_debug"):
-            go_to_page("debugger")
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
-    # Footer
-    st.markdown('<div class="rootrott-footer" id="contact">', unsafe_allow_html=True)
-    fcol1, fcol2, fcol3 = st.columns([1, 1, 1])
-
-    with fcol1:
-        if os.path.exists(enza_path):
-            try:
-                enza_image = crop_and_fit_image(enza_path, 60)
-                st.image(enza_image, caption="Enza Zaden")
-            except Exception as e:
-                st.write(f"Error loading enza.png: {e}")
-
-    with fcol3:
-        if os.path.exists(cea_path):
-            try:
-                cea_image = crop_and_fit_image(cea_path, 40)
-                st.image(cea_image, caption="CEA Seed")
-            except Exception as e:
-                st.write(f"Error loading cea.png: {e}")
-
-    with fcol2:
-        st.markdown("Questions? Email: **you@example.com**")
-
-    st.markdown("</div>", unsafe_allow_html=True)  # footer
-    st.markdown("</div>", unsafe_allow_html=True)  # rootrott-main
+    with tab_extractor:
+        render_extractor_tool()
 
 
-# ---------- Extractor page ----------
-
-def show_jpg_extract_interface():
-    st.title("🧾 Extractor")
-    st.write("Upload a document and extract embedded images.")
+def render_extractor_tool():
+    st.subheader("🧾 Image Extractor")
+    st.write("Upload a document and extract embedded images for reuse or analysis.")
 
     uploaded_file = st.file_uploader(
         "Upload PDF, Word, PowerPoint, or Excel file",
@@ -380,15 +351,36 @@ def show_jpg_extract_interface():
         )
 
 
-# ---------- Leaf Analysis page ----------
+# -----------------------
+# Section: Phenotyping (Leaf Analysis + Debugger)
+# -----------------------
 
-def show_leaf_analysis_interface():
-    st.title("🌿 Leaf Analysis")
+def render_phenotyping():
+    st.markdown("### Phenotyping")
+    st.markdown(
+        """
+        Phenotyping tools help you **quantify traits from images** and  
+        tune the segmentation pipeline for new crops, recipes, or cameras.
+        """
+    )
+
+    tab_leaf, tab_debug = st.tabs(["Leaf Analysis", "Segmentation Debugger"])
+
+    with tab_leaf:
+        render_leaf_analysis_tool()
+
+    with tab_debug:
+        render_debugger_tool()
+
+
+def render_leaf_analysis_tool():
+    st.subheader("🌿 Leaf Analysis")
     st.write("Upload a leaf image to segment and measure leaf objects.")
 
     uploaded_file = st.file_uploader(
         "Upload a leaf image",
         type=["jpg", "jpeg", "png"],
+        key="leaf_file",
     )
 
     if uploaded_file is None:
@@ -401,7 +393,6 @@ def show_leaf_analysis_interface():
         st.error("Could not read the uploaded image.")
         return
 
-    # Show original image
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     st.image(image_rgb, caption="Original image", use_column_width=True)
 
@@ -414,27 +405,24 @@ def show_leaf_analysis_interface():
         st.error(f"Error during analysis: {e}")
         return
 
-    # Show mask
     st.image(mask, caption="Segmentation mask", use_column_width=True, clamp=True)
 
-    # Build measurement table
-    data_rows = []
+    rows = []
     for i, (x, y, w, h) in enumerate(measurements, start=1):
         width_cm = round(w / np.sqrt(px_per_cm2), 1)
         height_cm = round(h / np.sqrt(px_per_cm2), 1)
-        data_rows.append(
+        rows.append(
             {"Object": i, "Width (cm)": width_cm, "Height (cm)": height_cm, "x": x, "y": y}
         )
 
-    if not data_rows:
+    if not rows:
         st.warning("No objects above the minimum size threshold were found.")
         return
 
-    df = pd.DataFrame(data_rows)
-    st.subheader("Measurements")
+    df = pd.DataFrame(rows)
+    st.markdown("#### Measurements")
     st.dataframe(df, use_container_width=True)
 
-    # Excel download
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Measurements")
@@ -446,15 +434,91 @@ def show_leaf_analysis_interface():
     )
 
 
-# ---------- Box Plot page ----------
+def render_debugger_tool():
+    st.subheader("🧪 Segmentation Debugger")
+    st.write("Tune HSV & watershed parameters and see each stage of the pipeline.")
 
-def show_boxing_interface():
-    st.title("📊 Box Plot")
+    uploaded_file = st.file_uploader(
+        "Upload a leaf image",
+        type=["jpg", "jpeg", "png"],
+        key="debug_file",
+    )
+
+    params = debugger.SegmentationParams()
+
+    st.markdown("##### Parameters")
+    c1, c2 = st.columns(2)
+
+    with c1:
+        params.lower_hue = st.slider("Lower Hue", 0, 179, params.lower_hue)
+        params.upper_hue = st.slider("Upper Hue", 0, 179, params.upper_hue)
+        params.lower_saturation = st.slider(
+            "Lower Saturation", 0, 255, params.lower_saturation
+        )
+        params.upper_saturation = st.slider(
+            "Upper Saturation", 0, 255, params.upper_saturation
+        )
+        params.lower_value = st.slider("Lower Value", 0, 255, params.lower_value)
+        params.upper_value = st.slider("Upper Value", 0, 255, params.upper_value)
+
+    with c2:
+        params.kernel_size = st.slider("Kernel Size (odd numbers)", 1, 15, params.kernel_size, step=2)
+        params.morph_iterations = st.slider("Morph Iterations", 0, 10, params.morph_iterations)
+        params.dilate_iterations = st.slider("Dilate Iterations", 0, 10, params.dilate_iterations)
+        params.dist_transform_threshold = st.slider(
+            "Dist Transform Threshold", 0.0, 1.0, params.dist_transform_threshold, step=0.05
+        )
+
+    if uploaded_file is None:
+        st.info("Upload an image to view the debug plots.")
+        return
+
+    file_bytes = np.frombuffer(uploaded_file.read(), np.uint8)
+    image_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    if image_bgr is None:
+        st.error("Could not read the uploaded image.")
+        return
+
+    fig = debugger.create_debug_figure(image_bgr, uploaded_file.name, params)
+    st.pyplot(fig)
+
+    # Save parameters as JSON
+    config_str = json.dumps(params.__dict__, indent=2)
+    st.download_button(
+        label="Download parameter config (JSON)",
+        data=config_str,
+        file_name="segmentation_params.json",
+        mime="application/json",
+    )
+
+
+# -----------------------
+# Section: Data & Graphs (Box Plot)
+# -----------------------
+
+def render_data_graphs():
+    st.markdown("### Data & Graphs")
+    st.markdown(
+        """
+        Use this area when you already have **numeric data in tables** and want  
+        quick visual summaries for team updates or reports.
+        """
+    )
+
+    tab_box, = st.tabs(["Box Plot"])
+
+    with tab_box:
+        render_box_plot_tool()
+
+
+def render_box_plot_tool():
+    st.subheader("📊 Box Plot")
     st.write("Upload an Excel file and create a styled box plot.")
 
     uploaded_file = st.file_uploader(
         "Upload Excel file",
         type=["xlsx", "xls"],
+        key="box_file",
     )
 
     if uploaded_file is None:
@@ -499,7 +563,6 @@ def show_boxing_interface():
 
         st.pyplot(fig)
 
-        # PNG download
         buf = io.BytesIO()
         fig.savefig(buf, format="png", bbox_inches="tight")
         st.download_button(
@@ -510,105 +573,31 @@ def show_boxing_interface():
         )
 
 
-# ---------- Debugger page ----------
-
-def show_debugger_interface():
-    st.title("🧪 Leaf Segmentation Debugger")
-    st.write("Tune HSV + watershed parameters and see each stage of the pipeline.")
-
-    uploaded_file = st.file_uploader(
-        "Upload a leaf image",
-        type=["jpg", "jpeg", "png"],
-    )
-
-    # Parameter controls
-    params = debugger.SegmentationParams()
-
-    st.sidebar.header("Segmentation parameters")
-
-    params.lower_hue = st.sidebar.slider("Lower Hue", 0, 179, params.lower_hue)
-    params.upper_hue = st.sidebar.slider("Upper Hue", 0, 179, params.upper_hue)
-    params.lower_saturation = st.sidebar.slider(
-        "Lower Saturation", 0, 255, params.lower_saturation
-    )
-    params.upper_saturation = st.sidebar.slider(
-        "Upper Saturation", 0, 255, params.upper_saturation
-    )
-    params.lower_value = st.sidebar.slider("Lower Value", 0, 255, params.lower_value)
-    params.upper_value = st.sidebar.slider("Upper Value", 0, 255, params.upper_value)
-    params.kernel_size = st.sidebar.slider("Kernel Size", 1, 15, params.kernel_size, step=2)
-    params.morph_iterations = st.sidebar.slider("Morph Iterations", 0, 10, params.morph_iterations)
-    params.dilate_iterations = st.sidebar.slider("Dilate Iterations", 0, 10, params.dilate_iterations)
-    params.dist_transform_threshold = st.sidebar.slider(
-        "Dist Transform Threshold", 0.0, 1.0, params.dist_transform_threshold, step=0.05
-    )
-
-    if uploaded_file is None:
-        st.info("Upload an image to view the debug plots.")
-        return
-
-    file_bytes = np.frombuffer(uploaded_file.read(), np.uint8)
-    image_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    if image_bgr is None:
-        st.error("Could not read the uploaded image.")
-        return
-
-    fig = debugger.create_debug_figure(image_bgr, uploaded_file.name, params)
-    st.pyplot(fig)
-
-    # Save parameter config as JSON
-    config_buf = io.StringIO()
-    import json
-
-    json.dump(debugger.asdict(params), config_buf, indent=2) if hasattr(
-        debugger, "asdict"
-    ) else json.dump(params.__dict__, config_buf, indent=2)
-    st.download_button(
-        label="Download parameter config (JSON)",
-        data=config_buf.getvalue(),
-        file_name="segmentation_params.json",
-        mime="application/json",
-    )
-
-
 # -----------------------
-# Entry point
+# Main app
 # -----------------------
 
 def main():
-    st.set_page_config(page_title="RootRott.io", layout="wide")
+    st.set_page_config(page_title="Rootweiler", layout="wide")
+    inject_css()
 
-    render_header()
+    section = sidebar_nav()
 
-    # Read page from query params if present
-    try:
-        qp = st.query_params
-        queried_page = qp.get("page")
-        if queried_page:
-            st.session_state["page"] = queried_page
-    except Exception:
-        # older Streamlit fallback
-        pass
-
-    if "page" not in st.session_state:
-        st.session_state["page"] = "main"
-
-    page = st.session_state["page"]
-
-    if page == "extractor":
-        show_jpg_extract_interface()
-    elif page == "leaf_analysis":
-        show_leaf_analysis_interface()
-    elif page == "boxing":
-        show_boxing_interface()
-    elif page == "debugger":
-        show_debugger_interface()
+    if section == "Home":
+        render_home()
+    elif section == "Calculators":
+        render_calculators()
+    elif section == "Climate":
+        render_climate()
+    elif section == "Phenotyping":
+        render_phenotyping()
+    elif section == "Data & Graphs":
+        render_data_graphs()
+    elif section == "Imaging":
+        render_imaging()
     else:
-        show_main_interface()
+        render_home()
 
 
 if __name__ == "__main__":
     main()
-
-
-
