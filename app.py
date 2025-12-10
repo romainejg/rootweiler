@@ -37,11 +37,9 @@ def inject_css():
     st.markdown(
         """
         <style>
-        /* Import Rubik from Google Fonts; Urbane Rounded will be used if available on the system */
         @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap');
 
         :root {
-            /* Approx Enza palette */
             --rw-green: #45C96B;
             --rw-purple: #8C8BFF;
             --rw-grey: #E5E5E5;
@@ -53,7 +51,7 @@ def inject_css():
 
         /* App background + Typography */
         .stApp {
-            background: radial-gradient(circle at top left, #F6FFF8, #F3F6FF 45%, #FAFAFF 95%);
+            background: #ffffff;
             font-family: "Rubik", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
@@ -62,14 +60,13 @@ def inject_css():
             color: #111111;
         }
 
-        /* Main content width */
         .block-container {
             max-width: 1150px;
             padding-top: 1.5rem;
             padding-bottom: 3rem;
         }
 
-        /* Sidebar styling – lighter + clearer */
+        /* Sidebar styling – light, readable */
         [data-testid="stSidebar"] {
             background: #F5F7FB;
             color: #111827;
@@ -95,42 +92,65 @@ def inject_css():
             margin-bottom: 0.9rem;
         }
 
-        /* Card-style boxes */
-        .rw-card {
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 18px;
-            padding: 1.3rem 1.4rem;
-            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
-            border: 1px solid rgba(148, 163, 184, 0.3);
-            margin-bottom: 1.3rem;
-        }
-
-        .rw-pill {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.2rem 0.7rem;
-            border-radius: 999px;
-            background: rgba(69, 201, 107, 0.12);
-            color: #047857;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-        }
-
-        .rw-stat-label {
-            font-size: 0.8rem;
-            color: #6b7280;
-        }
-        .rw-stat-value {
+        /* Home hero */
+        .rw-hero-hello {
             font-size: 1.4rem;
+            color: #4B5563;
+            margin-bottom: 0.2rem;
+        }
+        .rw-hero-name {
+            font-size: 2.6rem;
+            font-weight: 800;
+            margin-bottom: 0.8rem;
+        }
+        .rw-hero-intro {
+            font-size: 0.98rem;
+            color: #4B5563;
+            line-height: 1.6;
+        }
+
+        .rw-hero-icon-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 1.4rem;
+        }
+        .rw-hero-icon-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 999px;
+            background: #111111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #F9FAFB;
+            font-size: 0.9rem;
             font-weight: 700;
         }
+        .rw-hero-icon-text {
+            font-size: 0.85rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #6B7280;
+        }
 
-        /* Simple image band styling */
-        .rw-image-band img {
-            border-radius: 18px;
-            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+        /* Thin divider */
+        .rw-divider {
+            border: none;
+            border-top: 1px solid #E5E7EB;
+            margin: 2.5rem 0 1.5rem 0;
+        }
+
+        /* Bottom contact row */
+        .rw-contact-label {
+            font-size: 0.9rem;
+            color: #6B7280;
+            margin-bottom: 0.25rem;
+        }
+        .rw-contact-value {
+            font-size: 1.0rem;
+            font-weight: 500;
+            color: #111827;
         }
 
         </style>
@@ -151,7 +171,8 @@ def sidebar_nav():
         cols = st.columns([1, 3])
         with cols[0]:
             if os.path.exists(logo_path):
-                logo_img = Image.open(logo_path).resize((60, 60), Image.LANCZOS)
+                # Larger icon for sidebar
+                logo_img = Image.open(logo_path).resize((80, 80), Image.LANCZOS)
                 st.image(logo_img, use_column_width=True)
         with cols[1]:
             st.markdown('<div class="rw-sidebar-title">ROOTWEILER</div>', unsafe_allow_html=True)
@@ -182,123 +203,86 @@ def sidebar_nav():
 
 
 # -----------------------
-# Section: Home
+# Section: Home (minimal hero layout)
 # -----------------------
 
 def render_home():
     script_dir = get_script_dir()
+    lettuce1 = os.path.join(script_dir, "lettuce1.jpg")
     enza_path = os.path.join(script_dir, "enza.png")
     cea_path = os.path.join(script_dir, "cea.png")
-    lettuce1 = os.path.join(script_dir, "lettuce1.jpg")
-    lettuce2 = os.path.join(script_dir, "lettuce2.jpg")
-    lettuce3 = os.path.join(script_dir, "lettuce3.jpg")
+    logo_path = os.path.join(script_dir, "logo.png")
 
-    # Hero
-    col1, col2 = st.columns([1.15, 1.4])
-    with col1:
-        st.markdown("## Rootweiler")
+    # Small icon row at very top of page
+    st.markdown(
+        '<div class="rw-hero-icon-row">'
+        '<div class="rw-hero-icon-circle">R</div>'
+        '<div class="rw-hero-icon-text">Rootweiler • greenhouse support</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Hero: image left, text right
+    col_img, col_text = st.columns([1.1, 1.4])
+
+    with col_img:
+        if os.path.exists(lettuce1):
+            hero_img = Image.open(lettuce1)
+        elif os.path.exists(logo_path):
+            hero_img = Image.open(logo_path)
+        else:
+            hero_img = None
+
+        if hero_img is not None:
+            st.image(hero_img, use_column_width=True)
+        else:
+            st.write("")
+
+    with col_text:
+        st.markdown('<div class="rw-hero-hello">Hello!</div>', unsafe_allow_html=True)
+        st.markdown('<div class="rw-hero-name">I’m Rootweiler.</div>', unsafe_allow_html=True)
         st.markdown(
-            "_A quiet, non-profit tool to support greenhouse growers, plant breeders and agronomists._"
+            '<div class="rw-hero-intro">'
+            "A quiet, non-profit tool for people who live their days between crops, climate graphs and spreadsheets. "
+            "Rootweiler is a place to prototype small digital helpers for controlled environments – without turning "
+            "every idea into a full-scale project."
+            "<br><br>"
+            "Right now it’s just a sketch: a few sections to explore **Calculators, Climate, Phenotyping, Data & Graphs, "
+            "and Imaging**. The shape of it will come from the growers, breeders and agronomists who try it."
+            "</div>",
+            unsafe_allow_html=True,
         )
-        st.markdown(
-            """
-            Rootweiler explores how simple digital helpers can ease the day-to-day work in controlled environments:
-            connecting **canopies, climate and data** in a way that stays practical for teams on the floor.
 
-            This space is being shaped with the industry, not for it – ideas are welcome, experiments are expected,
-            and nothing here is finished.
-            """
-        )
+    # Thin divider
+    st.markdown('<hr class="rw-divider">', unsafe_allow_html=True)
 
-    with col2:
-        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
-        st.markdown('<span class="rw-pill">Non-profit initiative</span>', unsafe_allow_html=True)
-        st.markdown("#### A shared toolbench")
-        st.markdown(
-            """
-            The aim is simple:
+    # Bottom row: logo – contact – logo, all centered with similar heights
+    col_left, col_center, col_right = st.columns([1, 1.4, 1])
 
-            - Give teams a neutral place to try digital workflows  
-            - Keep interfaces light enough for busy seasons  
-            - Leave room for both practical use and curiosity  
-
-            Over time, the categories on the left – **Calculators, Climate, Phenotyping, Data & Graphs, Imaging** –  
-            can grow into a small toolbox the sector maintains together.
-            """
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # Who it's for
-    st.markdown("### Where this could help")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
-        st.markdown("**Growers**")
-        st.markdown(
-            "- Keep an eye on crop development\n"
-            "- Collect observations in a consistent way\n"
-            "- Share what you see with the wider team"
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c2:
-        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
-        st.markdown("**Breeders**")
-        st.markdown(
-            "- Compare selections across trials\n"
-            "- Bring visuals and notes into the same place\n"
-            "- Experiment with light, climate and layout ideas"
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c3:
-        st.markdown('<div class="rw-card">', unsafe_allow_html=True)
-        st.markdown("**Agronomy & R&D**")
-        st.markdown(
-            "- Explore links between setups and responses\n"
-            "- Prototype simple ways of sharing trial results\n"
-            "- Test ideas without committing to big systems"
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # Lettuce image band for a bit of color & life
-    st.markdown("### Glimpses from the canopy")
-    img_cols = st.columns(3)
-    lettuce_paths = [lettuce1, lettuce2, lettuce3]
-    for c, path in zip(img_cols, lettuce_paths):
-        with c:
-            if os.path.exists(path):
-                with st.container():
-                    st.markdown('<div class="rw-image-band">', unsafe_allow_html=True)
-                    st.image(Image.open(path), use_column_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Logos (no heading, no captions, just visible)
-    logo_row = st.columns(3)
-    with logo_row[0]:
+    with col_left:
         if os.path.exists(enza_path):
             try:
-                st.image(crop_and_fit_image(enza_path, 70), use_column_width=False)
-            except Exception:
-                pass
-    with logo_row[1]:
-        st.write("")
-    with logo_row[2]:
-        if os.path.exists(cea_path):
-            try:
-                st.image(crop_and_fit_image(cea_path, 60), use_column_width=False)
+                st.image(crop_and_fit_image(enza_path, 40), use_column_width=False)
             except Exception:
                 pass
 
-    st.caption(
-        "Rootweiler is an experiment. Feedback from real growers, breeders and agronomists will shape what stays, "
-        "what changes, and what is added next."
-    )
+    with col_center:
+        st.markdown('<div class="rw-contact-label">Contact</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="rw-contact-value">rootweiler (at) example.org</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_right:
+        if os.path.exists(cea_path):
+            try:
+                st.image(crop_and_fit_image(cea_path, 40), use_column_width=False)
+            except Exception:
+                pass
 
 
 # -----------------------
-# Section: Calculators (placeholder)
+# Section: Calculators (concept placeholder)
 # -----------------------
 
 def render_calculators():
@@ -316,7 +300,7 @@ def render_calculators():
 
 
 # -----------------------
-# Section: Climate (placeholder)
+# Section: Climate (concept placeholder)
 # -----------------------
 
 def render_climate():
@@ -336,7 +320,7 @@ def render_climate():
 
 
 # -----------------------
-# Section: Imaging (Extractor)
+# Section: Imaging
 # -----------------------
 
 def render_imaging():
@@ -397,7 +381,7 @@ def render_extractor_tool():
 
 
 # -----------------------
-# Section: Phenotyping (Leaf Analysis + Debugger)
+# Section: Phenotyping
 # -----------------------
 
 def render_phenotyping():
@@ -539,7 +523,7 @@ def render_debugger_tool():
 
 
 # -----------------------
-# Section: Data & Graphs (Box Plot)
+# Section: Data & Graphs
 # -----------------------
 
 def render_data_graphs():
