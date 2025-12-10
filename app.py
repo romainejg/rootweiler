@@ -262,14 +262,14 @@ def render_home():
     with col_left:
         if os.path.exists(enza_path):
             try:
-                st.image(crop_and_fit_image(enza_path, 40), use_column_width=False)
+                st.image(crop_and_fit_image(enza_path, 80), use_column_width=False)
             except Exception:
                 pass
 
     with col_center:
         st.markdown('<div class="rw-contact-label">Contact</div>', unsafe_allow_html=True)
         st.markdown(
-            '<div class="rw-contact-value">rootweiler (at) example.org</div>',
+            '<div class="rw-contact-value">j.gray@enzazaden.com</div>',
             unsafe_allow_html=True,
         )
 
@@ -636,6 +636,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
