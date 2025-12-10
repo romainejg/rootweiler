@@ -113,10 +113,10 @@ def inject_css():
             display: flex;
             align-items: center;
             gap: 1rem;
+            margin-top: 3rem;
             margin-bottom: 1rem;
         }
         .rw-hero-icon-circle {
-            gap: 100px;
             width: 40px;
             height: 40px;
             border-radius: 999px;
@@ -628,6 +628,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
