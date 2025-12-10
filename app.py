@@ -104,20 +104,20 @@ def inject_css():
             margin-bottom: 0.8rem;
         }
         .rw-hero-intro {
-            font-size: 0.98rem;
+            font-size: 1.2rem;
             color: #4B5563;
-            line-height: 1.6;
+            line-height: 1.2;
         }
 
         .rw-hero-icon-row {
             display: flex;
             align-items: center;
-            gap: 3rem;
-            margin-bottom: 3rem;
+            gap: 1rem;
+            margin-bottom: 1rem;
         }
         .rw-hero-icon-circle {
             width: 40px;
-            height: 40px;
+            height: 80px;
             border-radius: 999px;
             background: #111111;
             display: flex;
@@ -209,8 +209,6 @@ def sidebar_nav():
 def render_home():
     script_dir = get_script_dir()
     lettuce1 = os.path.join(script_dir, "lettuce1.jpg")
-    enza_path = os.path.join(script_dir, "enza.png")
-    cea_path = os.path.join(script_dir, "cea.png")
     logo_path = os.path.join(script_dir, "logo.png")
 
     # Small icon row at very top of page
@@ -256,12 +254,12 @@ def render_home():
     st.markdown('<hr class="rw-divider">', unsafe_allow_html=True)
 
     # Bottom row: logo – contact – logo, all centered with similar heights
-    col_left, col_center, col_right = st.columns([1, 1.4, 1])
+    col_left, col_center= st.columns([1, 1])
 
     with col_left:
-        if os.path.exists(enza_path):
+        if os.path.exists(logo_path):
             try:
-                st.image(crop_and_fit_image(enza_path, 160), use_column_width=False)
+                st.image(crop_and_fit_image(logo_path, 160), use_column_width=False)
             except Exception:
                 pass
 
@@ -272,12 +270,6 @@ def render_home():
             unsafe_allow_html=True,
         )
 
-    with col_right:
-        if os.path.exists(cea_path):
-            try:
-                st.image(crop_and_fit_image(cea_path, 40), use_column_width=False)
-            except Exception:
-                pass
 
 
 # -----------------------
@@ -635,6 +627,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
