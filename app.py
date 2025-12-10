@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import cv2
 import base64
+import calculators
 
 import leafAnalysis
 import jpgExtract
@@ -337,61 +338,18 @@ def render_calculators():
     # -----------------------
     # VPD calculator
     # -----------------------
+def render_calculators():
+    st.markdown("## Calculators")
+
+    tab_dli, tab_vpd = st.tabs(
+        ["Daily Light Integral (DLI)", "Vapor Pressure Deficit (VPD)"]
+    )
+
+    with tab_dli:
+        calculators.DLICalculator.render()
+
     with tab_vpd:
-        st.subheader("Vapor Pressure Deficit (VPD)")
-
-        st.markdown(
-            """
-            VPD describes the drying power of the air and is closely tied to transpiration.
-
-            This calculator uses:
-
-            - **Air temperature** (°C or °F)  
-            - **Relative humidity** (%)  
-
-            and returns VPD in **kPa**.
-            """
-        )
-
-        col1, col2, col3 = st.columns([1, 1, 1])
-
-        with col1:
-            temp_unit = st.radio("Temperature unit", ["°C", "°F"], index=0, horizontal=True)
-
-        with col2:
-            temp_input = st.number_input(
-                f"Air temperature ({temp_unit})",
-                value=25.0,
-                step=0.5,
-            )
-
-        with col3:
-            rh = st.number_input(
-                "Relative Humidity (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=70.0,
-                step=1.0,
-            )
-
-        # Convert to °C if user entered °F
-        if temp_unit == "°F":
-            temp_c = (temp_input - 32.0) * 5.0 / 9.0
-        else:
-            temp_c = temp_input
-
-        if rh > 0 and rh <= 100:
-            # Saturation vapor pressure (kPa) at temp_c
-            es = 0.6108 * np.exp((17.27 * temp_c) / (temp_c + 237.3))
-            # Actual vapor pressure (kPa)
-            ea = es * (rh / 100.0)
-            vpd = es - ea  # kPa
-
-            st.markdown("### Result")
-            st.write(f"**VPD: {vpd:.2f} kPa**")
-        else:
-            st.info("Set relative humidity between 0 and 100% to calculate VPD.")
-
+        calculators.VPDCalculator.render()
 
 
 # -----------------------
@@ -731,6 +689,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
