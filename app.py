@@ -37,42 +37,62 @@ def inject_css():
     st.markdown(
         """
         <style>
-        /* App background + typography */
+        /* Import Rubik from Google Fonts; Urbane Rounded will be used if available on the system */
+        @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap');
+
+        :root {
+            /* Approx Enza palette */
+            --rw-green: #45C96B;
+            --rw-purple: #8C8BFF;
+            --rw-grey: #E5E5E5;
+            --rw-yellow: #FFD750;
+            --rw-red: #ED695D;
+            --rw-dark: #111111;
+            --rw-light-bg: #F5FAFF;
+        }
+
+        /* App background + Typography */
         .stApp {
-            background: radial-gradient(circle at top left, #f4fff7, #eaf4ff 45%, #f9f9ff 90%);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top left, #F6FFF8, #F3F6FF 45%, #FAFAFF 95%);
+            font-family: "Rubik", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: "Urbane Rounded", "Rubik", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: #111111;
         }
 
         /* Main content width */
         .block-container {
             max-width: 1150px;
-            padding-top: 2rem;
+            padding-top: 1.5rem;
             padding-bottom: 3rem;
         }
 
-        /* Sidebar styling */
+        /* Sidebar styling – lighter + clearer */
         [data-testid="stSidebar"] {
-            background: #111827;
-            color: #e5e7eb;
+            background: #F5F7FB;
+            color: #111827;
+            border-right: 1px solid #E5E7EB;
         }
         [data-testid="stSidebar"] h1, 
         [data-testid="stSidebar"] h2, 
         [data-testid="stSidebar"] h3 {
-            color: #f9fafb;
+            color: #111827;
         }
 
         .rw-sidebar-title {
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             font-weight: 800;
             letter-spacing: 0.08em;
             text-transform: uppercase;
-            color: #f9fafb;
-            margin-bottom: 0.25rem;
+            color: #111827;
+            margin-bottom: 0.15rem;
         }
         .rw-sidebar-subtitle {
             font-size: 0.8rem;
-            color: #9ca3af;
-            margin-bottom: 1rem;
+            color: #4B5563;
+            margin-bottom: 0.9rem;
         }
 
         /* Card-style boxes */
@@ -80,14 +100,9 @@ def inject_css():
             background: rgba(255, 255, 255, 0.98);
             border-radius: 18px;
             padding: 1.3rem 1.4rem;
-            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
-            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+            border: 1px solid rgba(148, 163, 184, 0.3);
             margin-bottom: 1.3rem;
-        }
-
-        .rw-card h3 {
-            margin-top: 0;
-            margin-bottom: 0.5rem;
         }
 
         .rw-pill {
@@ -95,7 +110,7 @@ def inject_css():
             align-items: center;
             padding: 0.2rem 0.7rem;
             border-radius: 999px;
-            background: rgba(16, 185, 129, 0.1);
+            background: rgba(69, 201, 107, 0.12);
             color: #047857;
             font-size: 0.75rem;
             font-weight: 600;
@@ -111,6 +126,13 @@ def inject_css():
             font-size: 1.4rem;
             font-weight: 700;
         }
+
+        /* Simple image band styling */
+        .rw-image-band img {
+            border-radius: 18px;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
@@ -126,7 +148,6 @@ def sidebar_nav():
     logo_path = os.path.join(script_dir, "logo.png")
 
     with st.sidebar:
-        # Logo + title
         cols = st.columns([1, 3])
         with cols[0]:
             if os.path.exists(logo_path):
@@ -135,7 +156,7 @@ def sidebar_nav():
         with cols[1]:
             st.markdown('<div class="rw-sidebar-title">ROOTWEILER</div>', unsafe_allow_html=True)
             st.markdown(
-                '<div class="rw-sidebar-subtitle">Digital sidekick for greenhouse teams.</div>',
+                '<div class="rw-sidebar-subtitle">A non-profit experiment in digital support for greenhouse teams.</div>',
                 unsafe_allow_html=True,
             )
 
@@ -168,50 +189,56 @@ def render_home():
     script_dir = get_script_dir()
     enza_path = os.path.join(script_dir, "enza.png")
     cea_path = os.path.join(script_dir, "cea.png")
+    lettuce1 = os.path.join(script_dir, "lettuce1.jpg")
+    lettuce2 = os.path.join(script_dir, "lettuce2.jpg")
+    lettuce3 = os.path.join(script_dir, "lettuce3.jpg")
 
     # Hero
-    col1, col2 = st.columns([1.1, 1.6])
+    col1, col2 = st.columns([1.15, 1.4])
     with col1:
-        st.markdown("### Rootweiler")
+        st.markdown("## Rootweiler")
         st.markdown(
-            "_A support tool for greenhouse growers, plant breeders, and agronomists._"
+            "_A quiet, non-profit tool to support greenhouse growers, plant breeders and agronomists._"
         )
         st.markdown(
             """
-            Rootweiler helps you turn messy imaging and trial files into **clean, usable data**.
+            Rootweiler explores how simple digital helpers can ease the day-to-day work in controlled environments:
+            connecting **canopies, climate and data** in a way that stays practical for teams on the floor.
 
-            - 🧾 Extract images straight from reports & slide decks  
-            - 🌿 Measure leaf size and structure at scale  
-            - 📊 Generate clean plots for updates & presentations  
-            - 🧪 Debug segmentation settings for new cultivars and lighting setups  
+            This space is being shaped with the industry, not for it – ideas are welcome, experiments are expected,
+            and nothing here is finished.
             """
         )
 
     with col2:
         st.markdown('<div class="rw-card">', unsafe_allow_html=True)
-        st.markdown('<span class="rw-pill">Greenhouse support</span>', unsafe_allow_html=True)
-        st.markdown("#### Why Rootweiler?")
+        st.markdown('<span class="rw-pill">Non-profit initiative</span>', unsafe_allow_html=True)
+        st.markdown("#### A shared toolbench")
         st.markdown(
             """
-            Greenhouse teams juggle **crop care, imaging, and reporting** under pressure.
-            Rootweiler takes care of the digital grunt work so you can spend more time in the crop,
-            less time in Excel.
+            The aim is simple:
 
-            - Central place to try tools  
-            - Simple enough for technicians  
-            - Flexible enough for data scientists  
+            - Give teams a neutral place to try digital workflows  
+            - Keep interfaces light enough for busy seasons  
+            - Leave room for both practical use and curiosity  
+
+            Over time, the categories on the left – **Calculators, Climate, Phenotyping, Data & Graphs, Imaging** –  
+            can grow into a small toolbox the sector maintains together.
             """
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Quick stats / use cases
-    st.markdown("#### Designed for your team")
+    # Who it's for
+    st.markdown("### Where this could help")
+
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown('<div class="rw-card">', unsafe_allow_html=True)
-        st.markdown("**Growers**", unsafe_allow_html=False)
+        st.markdown("**Growers**")
         st.markdown(
-            "- Check leaf size distributions\n- Compare blocks or recipes\n- Document issues with images"
+            "- Keep an eye on crop development\n"
+            "- Collect observations in a consistent way\n"
+            "- Share what you see with the wider team"
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -219,37 +246,55 @@ def render_home():
         st.markdown('<div class="rw-card">', unsafe_allow_html=True)
         st.markdown("**Breeders**")
         st.markdown(
-            "- Measure traits across trials\n- Export clean phenotype tables\n- Standardize imaging workflows"
+            "- Compare selections across trials\n"
+            "- Bring visuals and notes into the same place\n"
+            "- Experiment with light, climate and layout ideas"
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c3:
         st.markdown('<div class="rw-card">', unsafe_allow_html=True)
-        st.markdown("**Agronomists & R&D**")
+        st.markdown("**Agronomy & R&D**")
         st.markdown(
-            "- Explore responses vs climate\n- Build internal protocols\n- Share reproducible visuals"
+            "- Explore links between setups and responses\n"
+            "- Prototype simple ways of sharing trial results\n"
+            "- Test ideas without committing to big systems"
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Partners / footer
-    st.markdown("#### Partner logos")
-    fc1, fc2, fc3 = st.columns(3)
-    with fc1:
+    # Lettuce image band for a bit of color & life
+    st.markdown("### Glimpses from the canopy")
+    img_cols = st.columns(3)
+    lettuce_paths = [lettuce1, lettuce2, lettuce3]
+    for c, path in zip(img_cols, lettuce_paths):
+        with c:
+            if os.path.exists(path):
+                with st.container():
+                    st.markdown('<div class="rw-image-band">', unsafe_allow_html=True)
+                    st.image(Image.open(path), use_column_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Logos (no heading, no captions, just visible)
+    logo_row = st.columns(3)
+    with logo_row[0]:
         if os.path.exists(enza_path):
             try:
-                st.image(crop_and_fit_image(enza_path, 55), caption="Enza Zaden")
-            except Exception as e:
-                st.write(f"Error loading enza.png: {e}")
-    with fc2:
+                st.image(crop_and_fit_image(enza_path, 70), use_column_width=False)
+            except Exception:
+                pass
+    with logo_row[1]:
         st.write("")
-    with fc3:
+    with logo_row[2]:
         if os.path.exists(cea_path):
             try:
-                st.image(crop_and_fit_image(cea_path, 40), caption="CEA Seed")
-            except Exception as e:
-                st.write(f"Error loading cea.png: {e}")
+                st.image(crop_and_fit_image(cea_path, 60), use_column_width=False)
+            except Exception:
+                pass
 
-    st.caption("This is an early prototype. Tools and UX will evolve with real grower feedback.")
+    st.caption(
+        "Rootweiler is an experiment. Feedback from real growers, breeders and agronomists will shape what stays, "
+        "what changes, and what is added next."
+    )
 
 
 # -----------------------
@@ -257,19 +302,17 @@ def render_home():
 # -----------------------
 
 def render_calculators():
-    st.markdown("### Calculators")
+    st.markdown("## Calculators")
     st.markdown(
         """
-        This section will host quick calculators relevant to greenhouse operations, for example:
+        Over time, _Calculators_ can host small, focused tools that help with everyday questions in the greenhouse —
+        from planning to crop steering.
 
-        - 🌞 Daily Light Integral (DLI)  
-        - 🌡 Growing Degree Days (GDD)  
-        - 📦 Yield per m² projections  
-
-        For now, this area is a **placeholder** while we focus on imaging and phenotyping.
-        """,
+        This could include things like light planning, time-to-harvest estimates or simple rule-of-thumb checks.
+        For now, this area is intentionally open, a space to collect ideas from the teams using it.
+        """
     )
-    st.info("If you have specific calculators in mind, jot them down and we can design around that.")
+    st.info("If you have a specific calculator in mind, make a note of it – that helps decide what lands here first.")
 
 
 # -----------------------
@@ -277,16 +320,17 @@ def render_calculators():
 # -----------------------
 
 def render_climate():
-    st.markdown("### Climate")
+    st.markdown("## Climate")
     st.markdown(
         """
-        In a future iteration, the Climate area could:
+        _Climate_ is meant as a bridge between environmental data and the crop you see in front of you.
 
-        - Pull climate exports (e.g. from Priva, Hoogendoorn, Argus)  
-        - Aggregate them per zone / recipe / experiment  
-        - Link climate patterns to phenotyping outputs  
+        The long-term idea is to make it easier to:
+        - Organize climate exports from different systems  
+        - Look at patterns over time rather than single days  
+        - Connect climate views with the observations made in Phenotyping and Imaging  
 
-        Right now, no tools are wired here yet — think of this as a **reserved space** for future growth.
+        Right now this is a placeholder for that direction.
         """
     )
 
@@ -296,23 +340,24 @@ def render_climate():
 # -----------------------
 
 def render_imaging():
-    st.markdown("### Imaging")
+    st.markdown("## Imaging")
     st.markdown(
         """
-        Use Imaging tools when you want to **pull images out of existing files**  
-        like trial reports, slide decks, or Excel files.
+        _Imaging_ focuses on the visual side of greenhouse work – photos, documents, and other files
+        that carry information about the crop and experiments.
+
+        This space will grow into a small collection of ways to bring those visuals into a more workable format.
         """
     )
 
     tab_extractor, = st.tabs(["Image Extractor"])
-
     with tab_extractor:
         render_extractor_tool()
 
 
 def render_extractor_tool():
-    st.subheader("🧾 Image Extractor")
-    st.write("Upload a document and extract embedded images for reuse or analysis.")
+    st.subheader("Image Extractor")
+    st.write("Upload a document and collect the images it contains into a simple gallery.")
 
     uploaded_file = st.file_uploader(
         "Upload PDF, Word, PowerPoint, or Excel file",
@@ -329,21 +374,21 @@ def render_extractor_tool():
     try:
         images = jpgExtract.extract_images_from_bytes(data, ext)
     except Exception as e:
-        st.error(f"Error extracting images: {e}")
+        st.error(f"Something went wrong while reading the file: {e}")
         return
 
     if not images:
-        st.warning("No images big enough were found in this file.")
+        st.warning("No suitable images were found in this file.")
         return
 
     st.success(f"Found {len(images)} image(s).")
 
     for idx, (img, suggested_name) in enumerate(images):
-        st.image(img, caption=suggested_name, use_column_width=True)
+        st.image(img, caption=None, use_column_width=True)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         st.download_button(
-            label=f"Download {suggested_name}",
+            label=f"Download image {idx + 1}",
             data=buf.getvalue(),
             file_name=suggested_name,
             mime="image/png",
@@ -356,15 +401,17 @@ def render_extractor_tool():
 # -----------------------
 
 def render_phenotyping():
-    st.markdown("### Phenotyping")
+    st.markdown("## Phenotyping")
     st.markdown(
         """
-        Phenotyping tools help you **quantify traits from images** and  
-        tune the segmentation pipeline for new crops, recipes, or cameras.
+        _Phenotyping_ explores ways to look at crops more systematically through images – not to replace
+        grower knowledge, but to give it another lens.
+
+        The tools here are starting points for thinking about plant structure, leaf development and canopy patterns.
         """
     )
 
-    tab_leaf, tab_debug = st.tabs(["Leaf Analysis", "Segmentation Debugger"])
+    tab_leaf, tab_debug = st.tabs(["Leaf views", "Segmentation tuning"])
 
     with tab_leaf:
         render_leaf_analysis_tool()
@@ -374,8 +421,8 @@ def render_phenotyping():
 
 
 def render_leaf_analysis_tool():
-    st.subheader("🌿 Leaf Analysis")
-    st.write("Upload a leaf image to segment and measure leaf objects.")
+    st.subheader("Leaf views")
+    st.write("Upload a leaf image to explore basic measurements and structure.")
 
     uploaded_file = st.file_uploader(
         "Upload a leaf image",
@@ -384,7 +431,7 @@ def render_leaf_analysis_tool():
     )
 
     if uploaded_file is None:
-        st.info("Upload an image to start analysis.")
+        st.info("Upload an image to start.")
         return
 
     file_bytes = np.frombuffer(uploaded_file.read(), np.uint8)
@@ -394,7 +441,7 @@ def render_leaf_analysis_tool():
         return
 
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    st.image(image_rgb, caption="Original image", use_column_width=True)
+    st.image(image_rgb, caption=None, use_column_width=True)
 
     try:
         mask, measurements, px_per_cm2 = leafAnalysis.analyze_image(image_bgr)
@@ -402,10 +449,10 @@ def render_leaf_analysis_tool():
         st.error(str(e))
         return
     except Exception as e:
-        st.error(f"Error during analysis: {e}")
+        st.error(f"Something went wrong during processing: {e}")
         return
 
-    st.image(mask, caption="Segmentation mask", use_column_width=True, clamp=True)
+    st.image(mask, caption=None, use_column_width=True, clamp=True)
 
     rows = []
     for i, (x, y, w, h) in enumerate(measurements, start=1):
@@ -420,14 +467,14 @@ def render_leaf_analysis_tool():
         return
 
     df = pd.DataFrame(rows)
-    st.markdown("#### Measurements")
+    st.markdown("#### Table view")
     st.dataframe(df, use_container_width=True)
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Measurements")
     st.download_button(
-        label="Download measurements as Excel",
+        label="Download table (Excel)",
         data=buf.getvalue(),
         file_name="leaf_measurements.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -435,8 +482,8 @@ def render_leaf_analysis_tool():
 
 
 def render_debugger_tool():
-    st.subheader("🧪 Segmentation Debugger")
-    st.write("Tune HSV & watershed parameters and see each stage of the pipeline.")
+    st.subheader("Segmentation tuning")
+    st.write("Adjust thresholds and see how the image is broken down step by step.")
 
     uploaded_file = st.file_uploader(
         "Upload a leaf image",
@@ -466,7 +513,7 @@ def render_debugger_tool():
         params.morph_iterations = st.slider("Morph Iterations", 0, 10, params.morph_iterations)
         params.dilate_iterations = st.slider("Dilate Iterations", 0, 10, params.dilate_iterations)
         params.dist_transform_threshold = st.slider(
-            "Dist Transform Threshold", 0.0, 1.0, params.dist_transform_threshold, step=0.05
+            "Distance Transform Threshold", 0.0, 1.0, params.dist_transform_threshold, step=0.05
         )
 
     if uploaded_file is None:
@@ -482,10 +529,9 @@ def render_debugger_tool():
     fig = debugger.create_debug_figure(image_bgr, uploaded_file.name, params)
     st.pyplot(fig)
 
-    # Save parameters as JSON
     config_str = json.dumps(params.__dict__, indent=2)
     st.download_button(
-        label="Download parameter config (JSON)",
+        label="Download parameter set (JSON)",
         data=config_str,
         file_name="segmentation_params.json",
         mime="application/json",
@@ -497,23 +543,24 @@ def render_debugger_tool():
 # -----------------------
 
 def render_data_graphs():
-    st.markdown("### Data & Graphs")
+    st.markdown("## Data & Graphs")
     st.markdown(
         """
-        Use this area when you already have **numeric data in tables** and want  
-        quick visual summaries for team updates or reports.
+        _Data & Graphs_ is a place to give tables a bit more shape – quick visual checks rather than full analysis.
+
+        The idea is to make it easy to move from a sheet of numbers to a simple graphic you can show in a
+        greenhouse meeting or trial discussion.
         """
     )
 
-    tab_box, = st.tabs(["Box Plot"])
-
+    tab_box, = st.tabs(["Box view"])
     with tab_box:
         render_box_plot_tool()
 
 
 def render_box_plot_tool():
-    st.subheader("📊 Box Plot")
-    st.write("Upload an Excel file and create a styled box plot.")
+    st.subheader("Box view")
+    st.write("Upload an Excel file and build a quick box-style overview.")
 
     uploaded_file = st.file_uploader(
         "Upload Excel file",
@@ -528,26 +575,30 @@ def render_box_plot_tool():
     try:
         df = pd.read_excel(uploaded_file)
     except Exception as e:
-        st.error(f"Could not read Excel file: {e}")
+        st.error(f"Could not read the file: {e}")
         return
 
     if df.empty:
-        st.warning("The uploaded Excel file appears to be empty.")
+        st.warning("The uploaded file appears to be empty.")
         return
 
-    st.write("Preview of data:")
+    st.write("Preview:")
     st.dataframe(df.head(), use_container_width=True)
 
     columns = df.columns.tolist()
-    x_column = st.selectbox("X-axis column", options=columns)
-    y_column = st.selectbox("Y-axis column", options=columns)
+    if len(columns) < 2:
+        st.warning("Please provide a table with at least two columns.")
+        return
 
-    default_title = f"Box Plot of {y_column} by {x_column}"
-    plot_title = st.text_input("Plot title", value=default_title)
-    xlabel = st.text_input("X-axis label", value=x_column)
-    ylabel = st.text_input("Y-axis label", value=y_column)
+    x_column = st.selectbox("Group by (x-axis)", options=columns)
+    y_column = st.selectbox("Values (y-axis)", options=columns, index=min(1, len(columns) - 1))
 
-    if st.button("Generate box plot"):
+    default_title = f"{y_column} by {x_column}"
+    plot_title = st.text_input("Title", value=default_title)
+    xlabel = st.text_input("X label", value=x_column)
+    ylabel = st.text_input("Y label", value=y_column)
+
+    if st.button("Create view"):
         try:
             fig = boxing.generate_box_plot_figure(
                 data=df,
@@ -558,7 +609,7 @@ def render_box_plot_tool():
                 y_label=ylabel,
             )
         except Exception as e:
-            st.error(f"Error generating plot: {e}")
+            st.error(f"Something went wrong while drawing the plot: {e}")
             return
 
         st.pyplot(fig)
@@ -566,9 +617,9 @@ def render_box_plot_tool():
         buf = io.BytesIO()
         fig.savefig(buf, format="png", bbox_inches="tight")
         st.download_button(
-            label="Download plot as PNG",
+            label="Download image (PNG)",
             data=buf.getvalue(),
-            file_name="box_plot.png",
+            file_name="box_view.png",
             mime="image/png",
         )
 
