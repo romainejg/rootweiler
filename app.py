@@ -55,35 +55,53 @@ def show_main_interface():
             logo_image = logo_image.resize((300, 300), Image.LANCZOS)
             st.image(logo_image)
 
-    st.write("")  # spacing
+    st.markdown("---")
 
-    # Buttons mirroring your Tkinter main menu
-    if st.button("Extractor", use_container_width=True):
-        go_to_page("extractor")
+    # Make a 2x2 grid of “cards” instead of 4 full-width buttons
+    st.subheader("Tools")
 
-    if st.button("Leaf Analysis", use_container_width=True):
-        go_to_page("leaf_analysis")
+    row1 = st.columns(2)
+    row2 = st.columns(2)
 
-    if st.button("Box Plot", use_container_width=True):
-        go_to_page("boxing")
+    # --- Row 1 ---
+    with row1[0]:
+        st.markdown("#### 🧾 Extractor")
+        st.caption("Extract images from PDF, Word, PowerPoint & Excel files.")
+        if st.button("Open Extractor", key="home_extractor"):
+            go_to_page("extractor")
 
-    if st.button("Debug", use_container_width=True):
-        go_to_page("debugger")
+    with row1[1]:
+        st.markdown("#### 🌿 Leaf Analysis")
+        st.caption("Analyze leaf images and export measurements.")
+        if st.button("Open Leaf Analysis", key="home_leaf"):
+            go_to_page("leaf_analysis")
 
-    st.write("")  # spacing
+    # --- Row 2 ---
+    with row2[0]:
+        st.markdown("#### 📊 Box Plot")
+        st.caption("Create styled box plots from Excel data.")
+        if st.button("Open Box Plot", key="home_box"):
+            go_to_page("boxing")
 
-    # Footer images (Enza and CEA) similar to your Tkinter footer_frame
-    script_dir = get_script_dir()
+    with row2[1]:
+        st.markdown("#### 🧪 Debug")
+        st.caption("Visualize and tune leaf segmentation parameters.")
+        if st.button("Open Debugger", key="home_debug"):
+            go_to_page("debugger")
+
+    st.markdown("---")
+
+    # Footer logos (Enza and CEA) similar to your Tkinter footer_frame
     enza_path = os.path.join(script_dir, "enza.png")
     cea_path = os.path.join(script_dir, "cea.png")
 
-    footer_cols = st.columns(2)
+    footer_cols = st.columns([1, 1])
 
     with footer_cols[0]:
         if os.path.exists(enza_path):
             try:
-                enza_image = crop_and_fit_image(enza_path, 150)
-                st.image(enza_image)
+                enza_image = crop_and_fit_image(enza_path, 80)
+                st.image(enza_image, caption="Enza Zaden")
             except Exception as e:
                 st.write(f"Error loading enza.png: {e}")
 
@@ -91,7 +109,7 @@ def show_main_interface():
         if os.path.exists(cea_path):
             try:
                 cea_image = crop_and_fit_image(cea_path, 40)
-                st.image(cea_image)
+                st.image(cea_image, caption="CEA Seed")
             except Exception as e:
                 st.write(f"Error loading cea.png: {e}")
 
@@ -206,3 +224,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
