@@ -174,12 +174,12 @@ def sidebar_nav():
         with cols[0]:
             if os.path.exists(logo_path):
                 # Larger icon for sidebar
-                logo_img = Image.open(logo_path).resize((80, 80), Image.LANCZOS)
+                logo_img = Image.open(logo_path).resize((200, 200), Image.LANCZOS)
                 st.image(logo_img, use_column_width=True)
         with cols[1]:
             st.markdown('<div class="rw-sidebar-title">ROOTWEILER</div>', unsafe_allow_html=True)
             st.markdown(
-                '<div class="rw-sidebar-subtitle">A non-profit experiment in digital support for greenhouse teams.</div>',
+                '<div class="rw-sidebar-subtitle">Digital support for greenhouse teams.</div>',
                 unsafe_allow_html=True,
             )
 
@@ -243,10 +243,10 @@ def render_home():
         st.markdown('<div class="rw-hero-name">Welcome to Rootweiler.</div>', unsafe_allow_html=True)
         st.markdown(
             '<div class="rw-hero-intro">'
-            "A non-profit app for CEA leaders who live their days between crops, climate graphs, and spreadsheets. "
-            "Rootweiler is a place to find digital tools that assist with work in controlled environments."
+            "A non-profit app for greenhouse lettuce leaders who live their days between crops, climate dashboards, and endless data. "
+            "Rootweiler is a hub of digital tools that assists working in the controlled environment agriculture industry."
             "<br><br>"
-            "Right now we're still in development, but there are a few sections to explore from the sidebar (Calculators, Climate, Phenotyping, Data & Graphs, "
+            "Right now the app is still in development, but there are a few sections to explore (Calculators, Climate, Phenotyping, Data & Graphs, "
             "and Imaging)."
             "</div>",
             unsafe_allow_html=True,
@@ -256,7 +256,7 @@ def render_home():
     st.markdown('<hr class="rw-divider">', unsafe_allow_html=True)
 
     # Bottom row: logo – contact – logo, all centered with similar heights
-    _,_,col_center = st.columns([1,1,1])
+    col_center,_,_ = st.columns([1,1,1])
 
     with col_center:
         st.markdown('<div class="rw-contact-label">Contact</div>', unsafe_allow_html=True)
@@ -622,6 +622,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
