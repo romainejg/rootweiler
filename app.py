@@ -94,7 +94,7 @@ def inject_css():
 
         /* Home hero */
         .rw-hero-hello {
-            font-size: 1.4rem;
+            font-size: 2rem;
             color: #4B5563;
             margin-bottom: 0.2rem;
         }
@@ -116,7 +116,7 @@ def inject_css():
             margin-bottom: 1rem;
         }
         .rw-hero-icon-circle {
-            top: 100px;
+            gap: 100px;
             width: 40px;
             height: 40px;
             border-radius: 999px;
@@ -628,6 +628,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
