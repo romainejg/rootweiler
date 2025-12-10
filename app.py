@@ -171,20 +171,20 @@ def sidebar_nav():
 
     with st.sidebar:
 
-    # --- Large centered logo on top ---
-    if os.path.exists(logo_path):
-        logo_img = Image.open(logo_path).resize((180, 180), Image.LANCZOS)
-
-        st.markdown(
-            """
-            <div style="display:flex; justify-content:center; margin-top:10px; margin-bottom:0px;">
-                <img src="data:image/png;base64,{}" style="width:180px; height:auto;" />
-            </div>
-            """.format(
-                base64.b64encode(open(logo_path, "rb").read()).decode()
-            ),
-            unsafe_allow_html=True,
-        )
+        # --- Large centered logo on top ---
+        if os.path.exists(logo_path):
+            logo_img = Image.open(logo_path).resize((180, 180), Image.LANCZOS)
+    
+            st.markdown(
+                """
+                <div style="display:flex; justify-content:center; margin-top:10px; margin-bottom:0px;">
+                    <img src="data:image/png;base64,{}" style="width:180px; height:auto;" />
+                </div>
+                """.format(
+                    base64.b64encode(open(logo_path, "rb").read()).decode()
+                ),
+                unsafe_allow_html=True,
+            )
 
     # --- Title + Subtitle ---
     st.markdown(
@@ -647,6 +647,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
