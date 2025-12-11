@@ -1,4 +1,4 @@
-# phenotyping_tools.py - Bare Bones Mask Output
+# phenotyping_tools.py - Bare Bones Mask Output with Key Debug
 
 import io
 import os
@@ -12,31 +12,63 @@ from typing import List, Optional, Tuple, Dict
 from inference_sdk import InferenceHTTPClient
 
 # ---------------------------------------------------------------------
-# Roboflow SDK Integration (Minimal Version - Re-using the last confirmed working logic)
+# Roboflow SDK Integration (Minimal Version)
 # ---------------------------------------------------------------------
 @st.cache_data(show_spinner="Running Roboflow segmentation...")
 def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, object]], bool]:
-    # 1. Get and Clean API Key
+    
+    # ---------------------------------------------------------------
+    # 1. KEY RETRIEVAL AND DEBUG BLOCK
+    # ---------------------------------------------------------------
+    st.markdown("---")
+    st.subheader("🔑 API Key Access Debug")
+    
     api_key = None
+    key_source = "None Found"
+
     if "ROBOFLOW_API_KEY" in st.secrets:
         api_key = st.secrets["ROBOFLOW_API_KEY"]
+        key_source = "ROBOFLOW_API_KEY (Top Level)"
     elif "roboflow" in st.secrets and "api_key" in st.secrets["roboflow"]:
         api_key = st.secrets["roboflow"]["api_key"]
+        key_source = "roboflow/api_key (Section Level)"
 
-    if not api_key:
-        # Authentication failed/key not found
+    # Check if the key was found
+    if api_key is None:
+        st.error(f"❌ Key Retrieval Failed. Checked sources: {key_source}")
+        st.markdown("---")
         return None, False
 
+    # Check the state of the key after retrieval
+    original_key_length = len(api_key)
     api_key = api_key.strip()
+    stripped_key_length = len(api_key)
+
+    if stripped_key_length == 0:
+        st.error(f"❌ Key Found but is Empty/Whitespace only (Length: {original_key_length}).")
+        st.markdown("---")
+        return None, False
+
+    if original_key_length != stripped_key_length:
+        st.warning(f"⚠️ Key successfully stripped! Length was {original_key_length}, is now {stripped_key_length}.")
+    
+    st.success(f"✅ Key Found and Ready. Source: {key_source}, Final Length: {stripped_key_length}.")
+    st.markdown("---")
+    
+    # End of Debug Block
+    # ---------------------------------------------------------------
 
     # 2. Setup Client
     try:
         client = InferenceHTTPClient(
             api_url="https://serverless.roboflow.com",
-            api_key=api_key
+            # We use the stripped api_key here
+            api_key=api_key 
         )
-    except Exception:
-        return None, True # Attempted with key
+    except Exception as e:
+        st.error(f"❌ Client initialization failed (Pre-API call). Error: {e}")
+        st.markdown("---")
+        return None, True
 
     # 3. Save Temp File
     tmp_path = "tmp_phenotype_image.jpg"
@@ -56,22 +88,37 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
                 "output_message": "Segmentation started."
             }
         )
-    except Exception:
-        # Error during API call (e.g., Auth failure, network issue)
-        return None, True 
+    except Exception as e:
+        error_str = str(e)
+        st.markdown("#### Debug API Call Error")
+        st.error(f"❌ Roboflow Workflow Error: {e}")
+        if "401" in error_str or "403" in error_str or "Unauthorized" in error_str:
+             st.error("Authentication likely failed despite key being read.")
+        st.markdown("---")
+        return None, True
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
     # 5. Process Results
+    st.markdown("#### Debug API Response (Raw)")
+    st.json(result) # <-- Raw response for inspection
+
     if not isinstance(result, list) or len(result) == 0:
+        st.error("❌ Raw result was empty/invalid list from API.")
         return None, True
 
+    # Get the first result object
     obj = result[0]
-    preds = obj.get("output2") # Assuming 'output2' is the segmentation predictions
+    
+    # Extract predictions from "output2"
+    preds = obj.get("output2")
     
     if not isinstance(preds, list) or len(preds) == 0:
+        st.warning("⚠️ Prediction list ('output2') was empty. Model saw nothing or key is still failing.")
         return None, True
+    
+    st.markdown("---")
 
     return {"predictions": preds}, True
 
@@ -129,10 +176,11 @@ class PhenotypingUI:
             with c1: 
                 st.image(img_rgb, caption="Original Image", use_container_width=True)
             with c2: 
+                # Ensure mask is 3-channel for colored visualization if needed, but binary is fine
                 st.image(mask_bin, caption="Generated Binary Mask", use_container_width=True)
 
         else:
             if attempted_rf:
-                st.error("❌ Roboflow failed to return a mask. Check API Key and model logs.")
+                st.error("❌ Roboflow failed to return a mask. Check API Key validity/permissions and Raw Response above.")
             else:
-                st.error("❌ API Key not configured. Cannot generate mask.")
+                st.error("❌ API Key not found in `secrets.toml`. Cannot generate mask.")
