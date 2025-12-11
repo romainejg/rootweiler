@@ -11,3 +11,4 @@ python-pptx
 seaborn
 plotly
 inference-sdk
+scikit-image
