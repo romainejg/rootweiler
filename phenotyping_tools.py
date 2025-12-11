@@ -135,15 +135,20 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         with open(tmp_path, "wb") as f:
             f.write(image_bytes)
 
-        st.code(f"Calling workflow: workspace='rootweiler', id='leafy' with temp image file.")
+        # FIX APPLIED: Use an explicit dictionary for image input to avoid SDK list error.
+        image_input_dict = {"image": tmp_path} 
+        st.code(f"Calling workflow: workspace='rootweiler', id='leafy' with input dict: {image_input_dict}")
+        
         result = client.run_workflow(
             workspace_name="rootweiler",
             workflow_id="leafy",
-            images={"image": tmp_path},
+            images=image_input_dict,
         )
+        
         st.code("Workflow call succeeded (received a response).")
     except Exception as e:
         st.error(f"❌ Roboflow API call failed (Network/Timeout/Authentication issue). Error: {e}")
+        st.error(f"If the error is still 'list' object has no attribute 'items', try passing the dictionary inside a list: [image_input_dict]")
         st.markdown("---")
         return None, True
     finally:
@@ -172,7 +177,7 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
     # Print the structure of the relevant output keys
     st.code("Response Keys Found: " + ", ".join(obj.keys()))
     
-    # Extract the predictions from "output2" (This is the fix based on your workflow config)
+    # Extract the predictions from "output2" (Fixed based on your workflow configuration)
     preds = obj.get("output2") 
     
     if "output2" not in obj:
@@ -184,7 +189,7 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
     
     # Check for empty/invalid predictions list
     if not isinstance(preds, list):
-        st.error(f"❌ 'output2' is not a list (Type: {type(preds)}). It should contain predictions. Check Roboflow workflow output type.")
+        st.error(f"❌ 'output2' is not a list (Type: {type(preds)}). It should contain predictions.")
         st.markdown("---")
         return None, True
     
