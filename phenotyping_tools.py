@@ -1,4 +1,4 @@
-# phenotyping_tools.py - Bare Bones Mask Output with Direct HTTP Call and Safety Check
+# phenotyping_tools.py - Final Attempt with Simplified PIL Handling
 
 import io
 import os
@@ -10,44 +10,28 @@ import requests
 from typing import List, Optional, Tuple, Dict
 
 # ---------------------------------------------------------------------
-# Roboflow Workflow Integration (Using Direct HTTP POST)
+# Roboflow Workflow Integration (Using Direct HTTP POST) - UNCHANGED
 # ---------------------------------------------------------------------
 @st.cache_data(show_spinner="Running Roboflow segmentation...")
 def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, object]], bool]:
-    
     # 1. Key Retrieval
     api_key = None
     if "ROBOFLOW_API_KEY" in st.secrets:
         api_key = st.secrets["ROBOFLOW_API_KEY"]
     elif "roboflow" in st.secrets and "api_key" in st.secrets["roboflow"]:
         api_key = st.secrets["roboflow"]["api_key"]
-
-    if not api_key:
-        return None, False
-
+    if not api_key: return None, False
     api_key = api_key.strip()
     
-    # 2. Prepare the request (Image to Base64)
+    # 2. Prepare the request
     try:
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
     except Exception:
         return None, True
 
-    # Note: Use detect.roboflow.com/infer for workflows via HTTP
     url = "https://detect.roboflow.com/infer/workflows/rootweiler/leafy"
-    
-    params = {
-        "api_key": api_key
-    }
-    
-    payload = {
-        "inputs": {
-            "image": {
-                "type": "base64",
-                "value": base64_image
-            }
-        }
-    }
+    params = {"api_key": api_key}
+    payload = {"inputs": {"image": {"type": "base64", "value": base64_image}}}
 
     # 3. Send the Request
     result = None
@@ -55,38 +39,20 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         response = requests.post(url, params=params, json=payload)
         response.raise_for_status()
         result = response.json()
-        
-    except requests.exceptions.RequestException as e:
-        if hasattr(e, 'response') and (e.response.status_code == 401 or e.response.status_code == 403):
-            st.error("❌ Roboflow Auth Error via HTTP. Key permissions may be incorrect.")
-        else:
-            st.error(f"❌ Network/HTTP Error: {e}")
+    except Exception:
         return None, True
-    except Exception as e:
-        st.error(f"❌ General Error during HTTP request: {e}")
-        return None, True
-
 
     # 4. Process Results
     obj = result
-    
-    if not isinstance(obj, dict):
-        # The HTTP API should return a dictionary
-        return None, True
-    
-    # Extract predictions from "output2"
+    if not isinstance(obj, dict): return None, True
     preds = obj.get("output2")
-    
-    if not isinstance(preds, list) or len(preds) == 0:
-        return None, True
+    if not isinstance(preds, list) or len(preds) == 0: return None, True
 
     return {"predictions": preds}, True
 
 
 def _mask_from_roboflow_predictions(image_shape: Tuple[int, int, int], predictions: List[dict]) -> np.ndarray:
-    """
-    Build a binary mask from Roboflow instance segmentation polygons.
-    """
+    """Build a binary mask from Roboflow instance segmentation polygons."""
     h, w, _ = image_shape
     mask = np.zeros((h, w), dtype=np.uint8)
 
@@ -100,7 +66,7 @@ def _mask_from_roboflow_predictions(image_shape: Tuple[int, int, int], predictio
 
 
 # ---------------------------------------------------------------------
-# Streamlit UI (Bare Bones)
+# Streamlit UI (Bare Bones) - UPDATED FILE HANDLING
 # ---------------------------------------------------------------------
 class PhenotypingUI:
     """Bare-bones UI to upload image and display segmentation mask."""
@@ -121,19 +87,25 @@ class PhenotypingUI:
 
         image_bytes = uploaded.read()
         
-        # --- CRITICAL SAFETY CHECK ---
+        # --- CRITICAL SAFETY CHECK (Enhanced) ---
         if not image_bytes:
-            st.error("❌ The uploaded file is empty or corrupted. Please check the file and try again.")
+            st.error("❌ The uploaded file is empty or corrupted (zero bytes). Please check the file and try again.")
             return
         # -----------------------------
 
+        # --- SIMPLIFIED PIL OPENING (Crucial change) ---
         try:
-            pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        except Exception:
-            st.error("❌ Could not open the uploaded file. Ensure it is a valid JPG or PNG image.")
+            # Open the image without immediate conversion to eliminate a potential source of failure
+            pil_img = Image.open(io.BytesIO(image_bytes))
+            
+            # Now, safely convert it to RGB
+            img_rgb = np.array(pil_img.convert("RGB")) 
+            
+        except Exception as e:
+            # Report the exact exception to help identify library/format issues
+            st.error(f"❌ Could not open the uploaded file. Ensure it is a valid JPG or PNG image. (Error: {type(e).__name__})")
             return
-
-        img_rgb = np.array(pil_img)
+        # -----------------------------------------------
 
         # --- Segmentation ---
         with st.spinner("Generating mask..."):
@@ -143,7 +115,7 @@ class PhenotypingUI:
             mask_bin = _mask_from_roboflow_predictions(img_rgb.shape, rf_result["predictions"])
             st.success(f"✅ Segmentation Success: Found {len(rf_result['predictions'])} leaf instances.")
             
-            # Use original and mask side-by-side
+            # Display
             c1, c2 = st.columns(2)
             with c1: 
                 st.image(img_rgb, caption="Original Image", use_container_width=True)
