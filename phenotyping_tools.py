@@ -84,6 +84,8 @@ def _overlay_grid_boxes(image_bgr: np.ndarray, boxes: List[Tuple[int, int, int, 
 # ---------------------------------------------------------------------
 # Roboflow workflow wrapper (DEBUG VERSION)
 # ---------------------------------------------------------------------
+# phenotyping_tools.py (Only the function _run_roboflow_workflow is shown with the final fix)
+
 @st.cache_data(show_spinner="Running Roboflow segmentation workflow...")
 def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, object]], bool]:
     """
@@ -104,12 +106,12 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         api_key = st.secrets["roboflow"]["api_key"]
         st.code("Key found under st.secrets['roboflow']['api_key']. Length: " + str(len(api_key)))
     else:
-        st.error("❌ API Key NOT found in st.secrets. Falling back immediately.")
+        st.error("❌ API Key NOT found in st.secrets.")
         st.markdown("---")
         return None, False
 
     if not api_key:
-        st.error("❌ API Key was found as an empty string. Falling back immediately.")
+        st.error("❌ API Key was found as an empty string.")
         st.markdown("---")
         return None, False
 
@@ -122,7 +124,7 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         )
         st.code("Client initialized successfully.")
     except Exception as e:
-        st.error(f"❌ Client initialization failed. Check API Key validity/permissions. Error: {e}")
+        st.error(f"❌ Client initialization failed. Error: {e}")
         st.markdown("---")
         return None, True
 
@@ -130,25 +132,27 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
     tmp_path = "tmp_phenotype_image.jpg"
     result = None
     try:
-        st.info("DEBUG STEP 3: Preparing and calling Roboflow workflow...")
+        st.info("DEBUG STEP 3: Preparing and calling Roboflow workflow (Applying Final Input Fix)...")
         
         with open(tmp_path, "wb") as f:
             f.write(image_bytes)
 
-        # FIX APPLIED: Use an explicit dictionary for image input to avoid SDK list error.
+        # FINAL FIX: Wrap the input dictionary in a list, as the SDK is treating 
+        # a single dictionary input as an iteration point and failing.
         image_input_dict = {"image": tmp_path} 
-        st.code(f"Calling workflow: workspace='rootweiler', id='leafy' with input dict: {image_input_dict}")
+        image_input_list = [image_input_dict] # <--- THE CRITICAL CHANGE
+        
+        st.code(f"Calling workflow: workspace='rootweiler', id='leafy' with input list: {image_input_list}")
         
         result = client.run_workflow(
             workspace_name="rootweiler",
             workflow_id="leafy",
-            images=image_input_dict,
+            images=image_input_list, # Pass the list containing the input dictionary
         )
         
         st.code("Workflow call succeeded (received a response).")
     except Exception as e:
         st.error(f"❌ Roboflow API call failed (Network/Timeout/Authentication issue). Error: {e}")
-        st.error(f"If the error is still 'list' object has no attribute 'items', try passing the dictionary inside a list: [image_input_dict]")
         st.markdown("---")
         return None, True
     finally:
@@ -161,7 +165,6 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
     # --- 4. RESPONSE PARSING STATUS ---
     st.info("DEBUG STEP 4: Analyzing API response structure...")
 
-    # Normalize result to a single object (dict)
     obj = None
     if isinstance(result, list) and len(result) > 0:
         obj = result[0]
@@ -174,10 +177,8 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         st.markdown("---")
         return None, True
 
-    # Print the structure of the relevant output keys
     st.code("Response Keys Found: " + ", ".join(obj.keys()))
     
-    # Extract the predictions from "output2" (Fixed based on your workflow configuration)
     preds = obj.get("output2") 
     
     if "output2" not in obj:
@@ -187,7 +188,6 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         
     st.info("DEBUG STEP 5: Checking 'output2' content for predictions...")
     
-    # Check for empty/invalid predictions list
     if not isinstance(preds, list):
         st.error(f"❌ 'output2' is not a list (Type: {type(preds)}). It should contain predictions.")
         st.markdown("---")
@@ -203,7 +203,6 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
     st.success(f"✅ Roboflow SUCCESS: Found {len(preds)} predictions in 'output2'.")
     st.markdown("---")
     
-    # Success: return the result in the format expected by the caller
     return {"predictions": preds}, True
 
 
