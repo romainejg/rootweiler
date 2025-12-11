@@ -100,7 +100,7 @@ def inject_css():
 
         /* Home hero */
         .rw-hero-hello {
-            font-size: 2rem;
+            font-size: 2.6rem;
             color: #4B5563;
             margin-top: 7rem;
             margin-bottom: 0.2rem;
@@ -307,11 +307,8 @@ def render_home():
         st.markdown('<div class="rw-hero-name">Welcome to Rootweiler.</div>', unsafe_allow_html=True)
         st.markdown(
             '<div class="rw-hero-intro">'
-            "A non-profit app for greenhouse lettuce leaders who live their days between crops, climate dashboards, and endless data. "
+            "A non-profit app for greenhouse leafy leaders who live their days between crops, climate, and endless data. "
             "Rootweiler is a hub of digital tools that assists working in the controlled environment agriculture industry."
-            "<br><br>"
-            "Right now the app is still in development, but there are a few sections to explore (Calculators, Climate, Phenotyping, Data & Graphs, "
-            "and Imaging)."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -717,6 +714,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
