@@ -30,8 +30,14 @@ BBox = Tuple[int, int, int, int]  # (x, y, w, h)
 
 def _call_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, Any]]:
     """
-    Try to call the Roboflow workflow using the inference SDK.
-    Handles different SDK expectations for the `images` argument.
+    Call the Roboflow workflow using the inference SDK.
+
+    Uses the documented pattern:
+        client.run_workflow(
+            workspace_name="rootweiler",
+            workflow_id="find-leaves-3",
+            images={"image": "/path/to/file.jpg"},
+        )
 
     Returns the raw workflow result dict, or None if anything fails.
     """
@@ -49,42 +55,34 @@ def _call_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, Any]]:
         api_key=api_key,
     )
 
-    # Write bytes to a temporary file (most SDK versions like file paths)
     import tempfile
 
+    # Write bytes to a temporary file; SDK expects file paths
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp.write(image_bytes)
         tmp_path = tmp.name
 
-    # We try two shapes for `images`: dict and list-of-dict.
-    # This avoids the `'list' object has no attribute 'items'` issues
-    # if the installed SDK version changed its expectations.
-    attempts = [
-        {"image": tmp_path},         # dict form
-        [{"image": tmp_path}],       # list-of-dict form
-    ]
-
-    last_error = None
-    for images_payload in attempts:
+    try:
+        # *** IMPORTANT: images is a dict, not a list ***
+        result = client.run_workflow(
+            workspace_name="rootweiler",
+            workflow_id="find-leaves-3",
+            images={"image": tmp_path},
+        )
+        return result
+    except Exception as e:
+        st.warning(
+            "Roboflow workflow failed or is not configured correctly. "
+            "Falling back to color-based segmentation.\n\n"
+            f"Details: {e}"
+        )
+        return None
+    finally:
+        # Clean up temp file
         try:
-            result = client.run_workflow(
-                workspace_name="rootweiler",
-                workflow_id="find-leaves-3",
-                images=images_payload,
-            )
-            # If we get here, call succeeded
             os.unlink(tmp_path)
-            return result
-        except Exception as e:
-            last_error = e
-
-    os.unlink(tmp_path)
-    st.warning(
-        "Roboflow workflow failed or is not configured correctly. "
-        "Falling back to color-based segmentation.\n\n"
-        f"Details: {last_error}"
-    )
-    return None
+        except OSError:
+            pass
 
 
 def _extract_mask_from_workflow_result(
