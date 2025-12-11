@@ -25,28 +25,28 @@ class LeafMeasurement:
 
 def _detect_grid_spacing_px(gray: np.ndarray) -> Optional[float]:
     """
-    Try to estimate pixels-per-1-cm-grid spacing from the background.
+    Try to estimate pixels-per-1-cm from the grid.
 
-    Returns: average spacing in pixels between vertical/horizontal grid lines,
-             or None if detection fails.
+    Returns: spacing in pixels between adjacent grid lines, or None if not reliable.
     """
     # Emphasize dark lines on light background
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, th = cv2.threshold(
+        blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )
 
     edges = cv2.Canny(th, 50, 150, apertureSize=3)
 
-    # Probabilistic Hough for line segments
     lines = cv2.HoughLinesP(
         edges,
         rho=1,
         theta=np.pi / 180,
         threshold=120,
-        minLineLength=40,
+        minLineLength=80,
         maxLineGap=5,
     )
 
-    if lines is None or len(lines) < 5:
+    if lines is None or len(lines) < 10:
         return None
 
     vertical_x = []
@@ -54,30 +54,37 @@ def _detect_grid_spacing_px(gray: np.ndarray) -> Optional[float]:
 
     for l in lines:
         x1, y1, x2, y2 = l[0]
-        dx = abs(x2 - x1)
-        dy = abs(y2 - y1)
+        dx = x2 - x1
+        dy = y2 - y1
 
-        if dx < 5 and dy > 20:  # near-vertical
+        if abs(dx) < abs(dy) * 0.2 and abs(dy) > 30:  # nearly vertical
             vertical_x.append((x1 + x2) / 2)
-        elif dy < 5 and dx > 20:  # near-horizontal
+        elif abs(dy) < abs(dx) * 0.2 and abs(dx) > 30:  # nearly horizontal
             horizontal_y.append((y1 + y2) / 2)
 
     def _spacing(vals: List[float]) -> Optional[float]:
         if len(vals) < 4:
             return None
         vals = np.array(sorted(vals))
-        # cluster close lines (same physical grid line)
         diffs = np.diff(vals)
-        # heuristic: ignore outliers > 2× median
-        med = np.median(diffs)
-        diffs = diffs[(diffs > 0.5 * med) & (diffs < 2.0 * med)]
+
+        # Filter obvious duplicates & outliers
+        diffs = diffs[diffs > 2.0]  # ignore near-zero spacing
         if len(diffs) == 0:
             return None
-        return float(np.median(diffs))
+        med = np.median(diffs)
+        diffs = diffs[(diffs > 0.5 * med) & (diffs < 1.5 * med)]
+        if len(diffs) == 0:
+            return None
+
+        spacing = float(np.median(diffs))
+        # Sanity check: grid lines should not be 1 px apart :)
+        if not (5.0 <= spacing <= 150.0):
+            return None
+        return spacing
 
     v_space = _spacing(vertical_x)
     h_space = _spacing(horizontal_y)
-
     candidates = [s for s in [v_space, h_space] if s is not None]
     if not candidates:
         return None
@@ -89,9 +96,13 @@ def _detect_grid_spacing_px(gray: np.ndarray) -> Optional[float]:
 # Leaf segmentation helpers
 # -------------------------
 
-def _segment_leaves_bgr(bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _segment_leaves_bgr(
+    bgr: np.ndarray,
+    lower_hsv: Tuple[int, int, int],
+    upper_hsv: Tuple[int, int, int],
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Segment lettuce leaves from grid background.
+    Segment lettuce leaves from grid background using HSV thresholds + watershed.
 
     Returns:
         mask (uint8): binary mask of leaves
@@ -99,9 +110,9 @@ def _segment_leaves_bgr(bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
 
-    # Wide-ish green range; user can still tweak upstream if needed
-    lower_green = np.array([30, 40, 40])
-    upper_green = np.array([90, 255, 255])
+    lower_green = np.array(lower_hsv, dtype=np.uint8)
+    upper_green = np.array(upper_hsv, dtype=np.uint8)
+
     mask = cv2.inRange(hsv, lower_green, upper_green)
 
     # Clean up noise
@@ -111,10 +122,11 @@ def _segment_leaves_bgr(bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
     # Distance transform for watershed
     dist = cv2.distanceTransform(mask_clean, cv2.DIST_L2, 5)
+
     # Threshold for sure-foreground
     _, sure_fg = cv2.threshold(
         dist,
-        0.5 * dist.max(),  # 50% of max distance
+        0.5 * dist.max(),
         255,
         0,
     )
@@ -145,19 +157,16 @@ def _segment_leaves_bgr(bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 def _measure_leaves(
     mask: np.ndarray,
     px_per_cm: float,
-    min_area_px: int = 2000,
+    min_area_px: int = 800,  # allow smaller leaves than before
 ) -> List[LeafMeasurement]:
     """
     Measure each leaf region in a binary mask.
 
     Uses contour area and bounding box 'height'.
-
-    Args:
-        mask: uint8 0/255
-        px_per_cm: calibration factor
-        min_area_px: tiny blobs below this are ignored
     """
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
 
     leaves: List[LeafMeasurement] = []
 
@@ -169,13 +178,12 @@ def _measure_leaves(
         x, y, w, h = cv2.boundingRect(cnt)
         height_px = max(w, h)  # approximate "leaf height"
 
-        # convert to cm/ cm²
+        # convert to cm / cm²
         if px_per_cm is not None and px_per_cm > 0:
             area_cm2 = area_px / (px_per_cm ** 2)
             height_cm = height_px / px_per_cm
             area_to_height_cm = area_cm2 / height_cm if height_cm > 0 else 0.0
         else:
-            # fallback: report px units only
             area_cm2 = float("nan")
             height_cm = float("nan")
             area_to_height_cm = float("nan")
@@ -207,8 +215,8 @@ class PhenotypingUI:
 
         st.markdown(
             """
-            Upload a **top-down photo on the centimetre grid**.  
-            Rootweiler will try to:
+            Upload a **top-down photo on the 1 cm grid**.  
+            Rootweiler will:
 
             - Count individual leaves (even if touching / overlapping)
             - Measure **leaf area (cm²)** and an approximate **leaf height (cm)**
@@ -244,45 +252,68 @@ class PhenotypingUI:
                 default_px_cm = auto_spacing
             else:
                 st.warning(
-                    "Could not confidently detect grid spacing. "
-                    "Use the slider below to calibrate manually."
+                    "Could not reliably detect grid spacing automatically. "
+                    "Using a rough guess based on board width – adjust if needed."
                 )
-                # crude guess: width / 30 (for ~30 cm board)
+                # rough guess: board around 30 cm wide
                 default_px_cm = bgr.shape[1] / 30.0
 
             px_per_cm = st.slider(
                 "Pixels per centimetre (adjust if needed)",
                 min_value=5.0,
-                max_value=80.0,
+                max_value=120.0,
                 value=float(default_px_cm),
                 step=0.5,
-                help="Drag until 1 cm on the grid visually matches on-screen.",
+                help="Drag until one grid square on screen visually matches 1 cm.",
             )
 
+        # --- Segmentation settings -------------------------------------------
+        with st.expander("Segmentation settings", expanded=False):
+            st.write("Tune these if leaves are over/under-detected.")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                lower_h = st.slider("Lower Hue", 10, 80, 30)
+                lower_s = st.slider("Lower Saturation", 0, 120, 40)
+                lower_v = st.slider("Lower Value", 0, 120, 40)
+            with col2:
+                upper_h = st.slider("Upper Hue", 40, 120, 90)
+                upper_s = st.slider("Upper Saturation", 150, 255, 255)
+                upper_v = st.slider("Upper Value", 150, 255, 255)
+
+        lower_hsv = (lower_h, lower_s, lower_v)
+        upper_hsv = (upper_h, upper_s, upper_v)
+
         # --- Segmentation + measurement --------------------------------------
-        mask, markers = _segment_leaves_bgr(bgr)
+        mask, markers = _segment_leaves_bgr(bgr, lower_hsv, upper_hsv)
         leaves = _measure_leaves(mask, px_per_cm=px_per_cm)
 
         if not leaves:
-            st.error("No leaf regions detected. Try checking lighting, focus, or grid visibility.")
+            st.error(
+                "No leaf regions detected. Try lowering the minimum thresholds in the "
+                "Segmentation settings or checking lighting / focus."
+            )
             return
 
         # Build overlay for preview
         overlay = bgr.copy()
-        vis = bgr.copy()
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
 
-        for i, cnt in enumerate(contours, start=1):
+        leaf_index = 1
+        for cnt in contours:
             area_px = cv2.contourArea(cnt)
-            if area_px < 2000:
+            if area_px < 800:
                 continue
+
             color = (0, 255, 0)
             cv2.drawContours(overlay, [cnt], -1, color, 2)
             x, y, w, h = cv2.boundingRect(cnt)
             cv2.rectangle(overlay, (x, y), (x + w, y + h), (255, 0, 0), 1)
             cv2.putText(
                 overlay,
-                str(i),
+                str(leaf_index),
                 (x, y - 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
@@ -290,8 +321,8 @@ class PhenotypingUI:
                 2,
                 cv2.LINE_AA,
             )
+            leaf_index += 1
 
-        # Blend overlay with original
         alpha = 0.5
         vis = cv2.addWeighted(overlay, alpha, bgr, 1 - alpha, 0)
         vis_rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
@@ -318,13 +349,16 @@ class PhenotypingUI:
         ).sort_values("Leaf ID")
 
         st.markdown("### Leaf measurements")
-        st.dataframe(df.style.format(
-            {
-                "Area (cm²)": "{:.2f}",
-                "Height (cm)": "{:.2f}",
-                "Area : height (cm)": "{:.2f}",
-            }
-        ), use_container_width=True)
+        st.dataframe(
+            df.style.format(
+                {
+                    "Area (cm²)": "{:.2f}",
+                    "Height (cm)": "{:.2f}",
+                    "Area : height (cm)": "{:.2f}",
+                }
+            ),
+            use_container_width=True,
+        )
 
         areas = df["Area (cm²)"].to_numpy()
         mean_area = float(np.nanmean(areas))
@@ -336,6 +370,7 @@ class PhenotypingUI:
         st.write(f"- Leaf area standard deviation: **{std_area:.2f} cm²**")
 
         st.caption(
-            "Leaf height is approximated from the longer side of the bounding box around each leaf. "
-            "Area : height (cm) can help compare compact vs. elongated leaf shapes."
+            "Leaf height is approximated as the longer side of each bounding box. "
+            "Area : height helps compare compact vs. elongated leaf shapes. "
+            "If results look off, tweak the HSV thresholds or grid calibration."
         )
