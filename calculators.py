@@ -304,13 +304,20 @@ class CanopyClosureCalculator:
     - Average PPFD during the photoperiod (µmol·m⁻²·s⁻¹)
     - Photoperiod length (hours of light per day)
 
-    Simple crop-agnostic model tuned for leafy crops.
-    It scales with **density**, **light (DLI)** and **temperature** and can be
-    used at any density as a first-pass approximation.
+    This is a simple, crop-agnostic toy model mainly tuned for leafy crops,
+    but it accepts densities up to 2000 plants/m² and lets you factor in:
+
+    - Germination time (hours from sowing to emergence)
+    - Transplant offset (days from sowing until plants enter this environment)
+
+    The climate you enter is assumed to describe conditions **after transplant**.
     """
 
     # Target leaf area index (LAI) at which we say "canopy closed"
     BASE_LAI_TARGET = 3.0  # typical "closed" canopy for leafy crops
+
+    # Reference density for saturation behaviour
+    DENSITY_REF = 25.0  # plants/m² (around typical leafy spacing)
 
     # Leaf area produced per plant per mol DLI at reference temp (20 °C)
     # Tuned so that: ~25 plants/m², ~15 mol DLI, ~20 °C  => ≈ 18 days to closure
@@ -323,7 +330,26 @@ class CanopyClosureCalculator:
         ~4% change in growth rate per °C, clipped to a reasonable range.
         """
         factor = 1.0 + 0.04 * (temp_c - 20.0)
+        # Avoid silly extremes
         return float(np.clip(factor, 0.4, 1.6))
+
+    @classmethod
+    def density_factor(cls, density_plants_m2: float) -> float:
+        """
+        Saturating density response:
+        - ~linear at low density
+        - approaches 1.5× reference effect at very high density
+
+        This avoids the unrealistic 1/density behaviour where doubling
+        density always halves days.
+        """
+        if density_plants_m2 <= 0:
+            return 0.0
+
+        x = density_plants_m2 / cls.DENSITY_REF
+        # Smooth saturation using tanh
+        base = np.tanh(x) / np.tanh(1.0)  # ~1 at reference density
+        return float(np.clip(base, 0.1, 1.5))
 
     @classmethod
     def compute_days_to_closure(
@@ -334,16 +360,19 @@ class CanopyClosureCalculator:
         photoperiod_h: float = 16.0,
     ) -> float:
         """
-        Estimate days until canopy closure.
+        Estimate days from **transplant** under this environment
+        until canopy closure.
 
         Conceptual model:
-        - LAI = density * average leaf area per plant
-        - Daily leaf area per plant ∝ DLI × temp_factor
-        - Closure when LAI reaches BASE_LAI_TARGET
+        - DLI controls daily carbon / leaf production
+        - Temperature scales the biochemical rate (temp_factor)
+        - Density scales how many leaves per m² can be produced,
+          but with a saturation at high density.
 
-        So:
+        Steps:
         - DLI = f(PPFD, photoperiod)
-        - Daily LAI gain per m² = density * alpha * DLI * temp_factor
+        - Effective density factor = f(density)
+        - Daily LAI gain per m² = DENSITY_REF * alpha * DLI * temp_factor * density_factor
         - Days = LAI_target / daily_LAI_gain
         """
         if (
@@ -360,12 +389,12 @@ class CanopyClosureCalculator:
             return np.nan
 
         fT = cls.temp_factor(temp_c)
+        fN = cls.density_factor(density_plants_m2)
         lai_target = cls.BASE_LAI_TARGET
         alpha = cls.ALPHA_LEAF_PER_DLI
 
         # Daily LAI gain per m² ground
-        daily_lai_gain = density_plants_m2 * alpha * dli * fT
-
+        daily_lai_gain = cls.DENSITY_REF * alpha * dli * fT * fN
         if daily_lai_gain <= 0:
             return np.nan
 
@@ -378,7 +407,7 @@ class CanopyClosureCalculator:
 
         st.markdown(
             """
-            Rough estimate of **how many days** it takes for a crop to reach canopy closure
+            Rough estimate of **how many days** it takes a crop to reach canopy closure
             (LAI ≈ 3) based on:
 
             - **Plant density** (plants per m²)  
@@ -386,8 +415,12 @@ class CanopyClosureCalculator:
             - **Average PPFD during the light period** (µmol·m⁻²·s⁻¹)  
             - **Photoperiod** (hours of light per day)  
 
-            The model is tuned for **leafy crops** and can be used at different densities
-            to compare scenarios. Treat the result as a **relative guide**, not a label spec.
+            You can also include:
+
+            - **Germination time** (hours from sowing to emergence)  
+            - **Transplant offset** (days from sowing until plants enter this environment)  
+
+            The climate you enter is assumed to describe conditions **after transplant**.
             """
         )
 
@@ -397,7 +430,7 @@ class CanopyClosureCalculator:
             density = st.number_input(
                 "Plant density (plants/m²)",
                 min_value=1.0,
-                max_value=120.0,
+                max_value=2000.0,   # 👈 up to 2000 plants/m²
                 value=25.0,
                 step=1.0,
             )
@@ -427,8 +460,30 @@ class CanopyClosureCalculator:
                 step=0.5,
             )
 
-        # Compute
-        days = cls.compute_days_to_closure(
+        st.markdown("#### Propagation & timing")
+
+        g1, g2 = st.columns(2)
+        with g1:
+            germ_hours = st.number_input(
+                "Germination time (hours from sowing to emergence)",
+                min_value=0.0,
+                max_value=240.0,
+                value=72.0,
+                step=6.0,
+                help="If you don't care about sowing → closure, set to 0.",
+            )
+        with g2:
+            transplant_offset_days = st.number_input(
+                "Transplant offset (days from sowing until plants are in this environment)",
+                min_value=0.0,
+                max_value=60.0,
+                value=0.0,
+                step=1.0,
+                help="Use this for plug / nursery phase before this climate applies.",
+            )
+
+        # Core prediction
+        days_after_transplant = cls.compute_days_to_closure(
             density_plants_m2=density,
             temp_c=temp_c,
             ppfd=ppfd,
@@ -436,12 +491,38 @@ class CanopyClosureCalculator:
         )
         dli = DLICalculator.compute_dli(ppfd, photoperiod_h)
 
-        if np.isnan(days):
-            st.info("Enter non-zero values for density, PPFD and photoperiod to see an estimate.")
+        if np.isnan(days_after_transplant):
+            st.info(
+                "Enter non-zero values for density, PPFD and photoperiod "
+                "to see an estimate."
+            )
             return
 
-        st.markdown("### Result")
-        st.write(f"**Estimated days to canopy closure: {days:.1f} days**")
+        germ_days = germ_hours / 24.0
+        total_days_from_sowing = germ_days + transplant_offset_days + days_after_transplant
+
+        st.markdown("### Results")
+
+        st.write(
+            f"- From **transplant under this climate** to canopy closure: "
+            f"**{days_after_transplant:.1f} days**"
+        )
+        st.write(
+            f"- **Total from sowing to canopy closure** "
+            f"(germination + transplant offset + this climate): "
+            f"**{total_days_from_sowing:.1f} days**"
+        )
+
+        st.write(
+            f"- Germination assumed: **{germ_hours:.0f} hours** "
+            f"(~{germ_days:.1f} days)"
+        )
+        if transplant_offset_days > 0:
+            st.write(
+                f"- Transplant offset (nursery / plug phase): "
+                f"**{transplant_offset_days:.1f} days**"
+            )
+
         st.write(f"- Implied DLI: **{dli:.2f} mol·m⁻²·day⁻¹**")
 
         with st.expander("What this estimate assumes", expanded=False):
@@ -451,13 +532,19 @@ class CanopyClosureCalculator:
                 - Daily leaf area gain scales with:
                     - **DLI** (more light → faster closure)  
                     - **Temperature** (via a simple response around 20 °C)  
-                    - **Density** (more plants per m² → faster closure, linearly)  
-                - Reference tuning: ~**25 plants/m²**, **15 mol·m⁻²·day⁻¹**, **20°C** ⇒ ~**18 days** to closure  
+                    - **Density** (more plants per m² → faster closure, but with saturation)  
+                - Reference tuning: ~**{cls.DENSITY_REF:.0f} plants/m²**, **15 mol·m⁻²·day⁻¹**, **20°C** ⇒ ~**18 days** to closure  
 
-                Use it mainly to **compare setups**:
-                - Different densities  
-                - Different lighting strategies  
-                - Warmer vs cooler regimes  
+                Timing logic:
+                - Model predicts **days from transplant under this climate** to closure  
+                - Total time from sowing adds:
+                    - Germination time (hours → days)  
+                    - Optional transplant offset (days before plants see this climate)  
+
+                Best used as a **relative tool**:
+                - Compare different densities (up to 2000 plants/m²)  
+                - Explore effects of light level, photoperiod and temperature  
+                - Put climate strategies on a simple sowing → closure timeline  
                 """
             )
 
