@@ -304,15 +304,19 @@ class CanopyClosureCalculator:
     - Average PPFD during the photoperiod (µmol·m⁻²·s⁻¹)
     - Photoperiod length (hours of light per day)
 
-    This is a simple, crop-agnostic toy model mainly tuned for leafy crops
-    in the ~15–30 plants/m² range. Treat results as an approximate guide.
+    This is a simple, crop-agnostic toy model mainly tuned for leafy crops.
+    It scales with **density**, **light** and **temperature**, and can be used
+    at any density as a first-pass approximation.
     """
 
     # Target leaf area index (LAI) at which we say "canopy closed"
-    BASE_LAI_TARGET = 3.0  # typical for lettuce-type leafy crops
+    BASE_LAI_TARGET = 3.0  # typical "closed" canopy for leafy crops
+
+    # Reference density for saturation behaviour
+    DENSITY_REF = 25.0  # plants/m² (around typical leafy spacing)
 
     # Leaf area produced per plant per mol DLI at reference temp (20 °C)
-    # Tuned so that: ~25 plants/m², ~15 mol DLI, ~20 °C  => ~18 days to closure
+    # Tuned so that: ~25 plants/m², ~15 mol DLI, ~20 °C  => ≈ 18 days to closure
     ALPHA_LEAF_PER_DLI = 4.5e-4  # m² leaf / plant / mol DLI
 
     @staticmethod
@@ -325,8 +329,30 @@ class CanopyClosureCalculator:
         # Avoid silly extremes
         return float(np.clip(factor, 0.4, 1.6))
 
-    @staticmethod
+    @classmethod
+    def density_factor(cls, density_plants_m2: float) -> float:
+        """
+        Saturating density response:
+        - ~linear at low density
+        - approaches 1.5× reference effect at very high density
+
+        This avoids the unrealistic 1/density behaviour where doubling
+        density always halves days.
+        """
+        if density_plants_m2 <= 0:
+            return 0.0
+
+        # Normalise to reference density
+        x = density_plants_m2 / cls.DENSITY_REF
+        # Smooth saturation using tanh
+        # tanh(1) ~= 0.76 so we normalise by tanh(1) to make x=1 => factor ≈ 1
+        base = np.tanh(x) / np.tanh(1.0)
+        # Clip to 1.5 as an upper bound
+        return float(np.clip(base, 0.1, 1.5))
+
+    @classmethod
     def compute_days_to_closure(
+        cls,
         density_plants_m2: float,
         temp_c: float,
         ppfd: float,
@@ -335,9 +361,16 @@ class CanopyClosureCalculator:
         """
         Estimate days until canopy closure.
 
+        Conceptual model:
+        - DLI controls daily carbon / leaf production
+        - Temperature scales the biochemical rate (temp_factor)
+        - Density scales how many leaves per m² can be produced,
+          but with a saturation at high density.
+
         Steps:
         - DLI = f(PPFD, photoperiod)
-        - Daily LAI gain = density * alpha * DLI * temp_factor
+        - Effective density factor = f(density)
+        - Daily LAI gain per m² = DENSITY_REF * alpha * DLI * temp_factor * density_factor
         - Days = LAI_target / daily_LAI_gain
         """
         if (
@@ -354,18 +387,19 @@ class CanopyClosureCalculator:
         if dli <= 0:
             return np.nan
 
-        fT = CanopyClosureCalculator.temp_factor(temp_c)
-        lai_target = CanopyClosureCalculator.BASE_LAI_TARGET
-        alpha = CanopyClosureCalculator.ALPHA_LEAF_PER_DLI
+        fT = cls.temp_factor(temp_c)
+        fN = cls.density_factor(density_plants_m2)
+        lai_target = cls.BASE_LAI_TARGET
+        alpha = cls.ALPHA_LEAF_PER_DLI
 
         # Daily LAI gain per m² ground
-        daily_lai_gain = density_plants_m2 * alpha * dli * fT
+        daily_lai_gain = cls.DENSITY_REF * alpha * dli * fT * fN
 
         if daily_lai_gain <= 0:
             return np.nan
 
         days = lai_target / daily_lai_gain
-        return days
+        return float(days)
 
     @classmethod
     def render(cls):
@@ -381,8 +415,8 @@ class CanopyClosureCalculator:
             - **Average PPFD during the light period** (µmol·m⁻²·s⁻¹)  
             - **Photoperiod** (hours of light per day)  
 
-            Tuned mainly for **leafy crops** in the ~15–30 plants/m² range.
-            Treat the result as a **first-pass guide**, not a hard rule.
+            The model is tuned for **leafy crops** and can be used at different densities
+            to compare scenarios. Treat the result as a **relative guide**, not a label spec.
             """
         )
 
@@ -392,7 +426,7 @@ class CanopyClosureCalculator:
             density = st.number_input(
                 "Plant density (plants/m²)",
                 min_value=1.0,
-                max_value=80.0,
+                max_value=120.0,
                 value=25.0,
                 step=1.0,
             )
@@ -422,6 +456,7 @@ class CanopyClosureCalculator:
                 step=0.5,
             )
 
+        # Compute
         days = cls.compute_days_to_closure(
             density_plants_m2=density,
             temp_c=temp_c,
@@ -429,23 +464,30 @@ class CanopyClosureCalculator:
             photoperiod_h=photoperiod_h,
         )
 
+        dli = DLICalculator.compute_dli(ppfd, photoperiod_h)
+
         if np.isnan(days):
             st.info("Enter non-zero values for density, PPFD and photoperiod to see an estimate.")
             return
 
         st.markdown("### Result")
         st.write(f"**Estimated days to canopy closure: {days:.1f} days**")
+        st.write(f"- Implied DLI: **{dli:.2f} mol·m⁻²·day⁻¹**")
 
         with st.expander("What this estimate assumes", expanded=False):
             st.markdown(
                 f"""
                 - Target canopy: **LAI ≈ {cls.BASE_LAI_TARGET:.1f}**  
-                - Growth scales linearly with **daily DLI** and a simple temperature response  
-                - Tuned so that ~**25 plants/m²**, **15 mol·m⁻²·day⁻¹**, **20°C** ⇒ ~**18 days** to closure  
+                - Daily leaf area gain scales with:
+                    - **DLI** (more light → faster closure)  
+                    - **Temperature** (via a simple response around 20 °C)  
+                    - **Density** (more plants per m² → faster closure, but with saturation)  
+                - Reference tuning: ~**{cls.DENSITY_REF:.0f} plants/m²**, **15 mol·m⁻²·day⁻¹**, **20°C** ⇒ ~**18 days** to closure  
 
-                Best used as a **relative tool**:
-                - Compare scenarios (different densities / light levels / temps)  
-                - Sense-check whether a given climate is "slow", "normal", or "fast" for closure  
+                Use it mainly to **compare setups**:
+                - Different densities  
+                - Different lighting strategies  
+                - Warmer vs cooler regimes  
                 """
             )
 
