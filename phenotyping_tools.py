@@ -39,7 +39,6 @@ def _detect_grid_squares(image_bgr: np.ndarray) -> Tuple[Optional[float], List[T
     # Gaussian blur to help with Canny edge detection
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # Adaptive thresholding might also work well, but Canny is often used for contours
     edges = cv2.Canny(blurred, 50, 150, apertureSize=3)
 
     contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -47,7 +46,6 @@ def _detect_grid_squares(image_bgr: np.ndarray) -> Tuple[Optional[float], List[T
     squares: List[Tuple[int, int, int, int]] = []
 
     for contour in contours:
-        # Approximate the contour to a polygon
         perimeter = cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
 
@@ -60,7 +58,7 @@ def _detect_grid_squares(image_bgr: np.ndarray) -> Tuple[Optional[float], List[T
             if 0.8 < aspect_ratio < 1.2:
                  squares.append((x, y, w, h))
 
-    if len(squares) < 5: # Lowering the required count for robustness
+    if len(squares) < 5: 
         return None, []
 
     # Use median area to filter consistent squares
@@ -68,7 +66,6 @@ def _detect_grid_squares(image_bgr: np.ndarray) -> Tuple[Optional[float], List[T
     median_area = np.median(areas)
 
     # Keep squares whose area is closest to median, filtering outliers
-    # Use squares within 30% of the median area
     consistent_squares = [
         s for s, area in zip(squares, areas) if 0.7 * median_area < area < 1.3 * median_area
     ]
@@ -93,7 +90,6 @@ def _overlay_grid_boxes(image_bgr: np.ndarray, boxes: List[Tuple[int, int, int, 
     """Return a copy of the image with green rectangles drawn on detected grid squares."""
     out = image_bgr.copy()
     for (x, y, w, h) in boxes:
-        # Draw a green rectangle with thickness 2
         cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 2)
     return out
 
@@ -116,17 +112,14 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, object]]:
         api_key = st.secrets["roboflow"]["api_key"]
 
     if not api_key:
-        # st.info is removed here to avoid multiple messages on reruns
         return None
 
     try:
-        # Use an environment variable for the base URL if needed, but the serverless endpoint is correct
         client = InferenceHTTPClient(
             api_url="https://serverless.roboflow.com",
             api_key=api_key,
         )
     except Exception:
-        # st.info is removed here
         return None
 
     # Write bytes to a temporary file; run_workflow expects a file path
@@ -141,7 +134,6 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, object]]:
             images={"image": tmp_path},
         )
     except Exception as e:
-        # st.info is removed here
         return None
     finally:
         if os.path.exists(tmp_path):
@@ -158,18 +150,15 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, object]]:
         obj = result
     
     if not isinstance(obj, dict):
-        # st.info is removed here
         return None
 
     # Your workflow JSON uses "output2": { "image": {...}, "predictions": [...] }
     output2 = obj.get("output2")
     if not isinstance(output2, dict):
-        # st.info is removed here
         return None
 
     preds = output2.get("predictions")
     if not isinstance(preds, list) or len(preds) == 0:
-        # st.info is removed here
         return None
 
     return {"predictions": preds}
@@ -212,9 +201,9 @@ def _color_based_mask(image_bgr: np.ndarray) -> np.ndarray:
     mask = cv2.inRange(hsv, lower_green, upper_green)
 
     # Morphological operations to clean up the mask
-    kernel = np.ones((5, 5), np.uint8) # Slightly larger kernel for better smoothing
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2) # Fill small holes
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)  # Remove small specks
+    kernel = np.ones((5, 5), np.uint8) 
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2) 
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2) 
 
     return mask
 
@@ -235,7 +224,6 @@ def _measure_leaves(mask: np.ndarray, pixels_per_cm2: float) -> List[LeafMeasure
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask)
     measurements: List[LeafMeasurement] = []
     
-    # Minimum area threshold in pixels (e.g., 500 pixels)
     MIN_AREA_PX = 500
 
     for label_id in range(1, num_labels):
@@ -245,12 +233,9 @@ def _measure_leaves(mask: np.ndarray, pixels_per_cm2: float) -> List[LeafMeasure
             continue
 
         # Extract bounding box stats: x, y, width, height
-        x = stats[label_id, cv2.CC_STAT_LEFT]
-        y = stats[label_id, cv2.CC_STAT_TOP]
-        w = stats[label_id, cv2.CC_STAT_WIDTH]
         h = stats[label_id, cv2.CC_STAT_HEIGHT]
 
-        height_px = h # Using the height of the bounding box
+        height_px = h 
 
         # Conversion to cm
         area_cm2 = area_px / pixels_per_cm2
@@ -280,17 +265,14 @@ class PhenotypingUI:
     @classmethod
     def render(cls):
         st.subheader("Leaf phenotyping")
-        
-        # Adding a visual aid description
+
         st.markdown(
             """
             Upload a **phenotyping photo** taken on the 1&nbsp;cm grid board.  
-            
-
             Rootweiler will:
 
             1. Detect the grid and convert pixels to **cm²** (Grid Calibration)
-            2. Segment each leaf (via Roboflow or color-based fallback)
+            2. Segment each leaf (via your Roboflow leafy workflow if available)
             3. Measure leaf **area**, **height**, and **area : height** ratio
             """
         )
@@ -368,12 +350,12 @@ class PhenotypingUI:
         with c1:
             st.image(img_rgb, caption="Original Image", use_container_width=True)
         with c2:
-            st.image(mask_bin, caption="Binary Leaf Mask ", use_container_width=True)
+            st.image(mask_bin, caption="Binary Leaf Mask", use_container_width=True)
 
         # --- Table + summary ---
         st.markdown("### Leaf Measurements")
 
-        # --- DataFrame Creation (Completed Section) ---
+        # --- DataFrame Creation ---
         df = pd.DataFrame(
             [
                 {
@@ -388,7 +370,6 @@ class PhenotypingUI:
         
         # --- Summary Statistics ---
         st.markdown("#### Summary Statistics")
-        # Use only the measured numeric columns for the summary
         summary_df = df[["Area (cm²)", "Height (cm)", "Area/Height Ratio"]].describe().T
         st.dataframe(summary_df, use_container_width=True)
 
@@ -399,7 +380,6 @@ class PhenotypingUI:
         # --- Download Button ---
         @st.cache_data
         def convert_df_to_excel(df):
-            # Use io.BytesIO for in-memory Excel file creation
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False, sheet_name='LeafMeasurements')
