@@ -50,6 +50,28 @@ LETTUCE_TISSUE_RANGES = {
 # Core calculation helper functions
 # ---------------------------------
 
+def scale_stock_concentration(
+    old_ratio: float,
+    new_ratio: float,
+    grams_per_l_old: float,
+) -> float:
+    """
+    Scale stock solution concentration to keep the *working solution* the same
+    when you change injector ratio.
+
+    Ratios are X in "1:X".
+
+    We want:
+        Cs_old / R_old  =  Cs_new / R_new
+
+    → Cs_new = Cs_old * R_new / R_old
+    """
+    if old_ratio <= 0 or new_ratio <= 0:
+        return grams_per_l_old
+
+    return grams_per_l_old * (new_ratio / old_ratio)
+
+
 def grams_for_target_ppm(
     target_ppm: float,
     volume_l: float,
@@ -223,6 +245,9 @@ class NutrientToolsUI:
 
         with tabs[3]:
             cls._tab_leaf_tissue()
+        
+        with tabs[4]:
+            cls._tab_stock_converter() 
 
     # ------------------ Tab 1: EC / ppm mixer ------------------ #
 
@@ -564,4 +589,94 @@ class NutrientToolsUI:
             st.caption(
                 "Always interpret tissue tests together with climate, variety, growth stage, "
                 "and visual symptoms. This tool is a guide, not a diagnosis."
+            )
+    # ------------------ Tab 5: Stock recipe converter ------------------ #
+
+    @staticmethod
+    def _tab_stock_converter():
+        st.markdown(
+            """
+            ### Stock recipe converter
+
+            Use this when you **change injector ratio** (for example from 1:100 to 1:150)
+            and want to keep the **same working solution** in the greenhouse.
+
+            This tool scales the **stock solution grams per liter** for each product.
+            """
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            old_ratio = st.number_input(
+                "Old injection ratio (X in 1:X)",
+                min_value=1.0,
+                value=100.0,
+                step=1.0,
+                help="For a 1:100 injector, enter 100. For 1:150, enter 150.",
+            )
+        with col2:
+            new_ratio = st.number_input(
+                "New injection ratio (X in 1:X)",
+                min_value=1.0,
+                value=150.0,
+                step=1.0,
+                help="The new injector setting you want to use.",
+            )
+
+        st.markdown("#### Stock components")
+
+        n_products = st.number_input(
+            "Number of fertilizer components in this stock tank",
+            min_value=1,
+            max_value=10,
+            value=3,
+            step=1,
+        )
+
+        products = []
+        for i in range(n_products):
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                name = st.text_input(
+                    f"Product {i+1} name",
+                    value=f"Product {i+1}",
+                    key=f"stock_name_{i}",
+                )
+            with c2:
+                grams_per_l_old = st.number_input(
+                    f"Old g/L (Product {i+1})",
+                    min_value=0.0,
+                    value=100.0,
+                    step=1.0,
+                    key=f"stock_gpl_{i}",
+                )
+            products.append((name, grams_per_l_old))
+
+        if st.button("Convert recipe", type="primary"):
+            rows = []
+            factor = new_ratio / old_ratio if old_ratio > 0 else 1.0
+
+            for name, gpl_old in products:
+                gpl_new = scale_stock_concentration(old_ratio, new_ratio, gpl_old)
+                rows.append(
+                    {
+                        "Fertilizer": name,
+                        "Old g/L (stock)": round(gpl_old, 2),
+                        "New g/L (stock)": round(gpl_new, 2),
+                    }
+                )
+
+            st.markdown("#### Converted stock recipe")
+            st.table(pd.DataFrame(rows))
+
+            st.markdown("#### Scale factor")
+            st.write(
+                f"- Scale factor applied: **×{factor:.3f}**\n"
+                f"- Example: 100 g/L → {100 * factor:.1f} g/L"
+            )
+
+            st.caption(
+                "Logic: working concentration ≈ stock concentration ÷ injector ratio.\n"
+                "We keep (stock / ratio) the same, so when you change from 1:100 to 1:150, "
+                "stock concentration is multiplied by 150/100."
             )
