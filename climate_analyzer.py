@@ -585,7 +585,11 @@ class ClimateAnalyzerUI:
                 return
 
             ts_for_analysis = df_work["_ts_"]
-            window_desc = f"{start_dt.date()} → {end_dt.date()}" if start_dt and end_dt else "Full timestamp range"
+            window_desc = (
+                f"{start_dt.date()} → {end_dt.date()}"
+                if start_dt and end_dt
+                else "Full timestamp range"
+            )
         else:
             ts_for_analysis = None
             window_desc = "Full dataset (no timestamp)"
@@ -625,14 +629,14 @@ class ClimateAnalyzerUI:
             st.text("\n\n".join(metrics_text))
 
             st.markdown("**DLI overview**")
-            st.write(
-                f"- Mean DLI: {dli_metrics.get('mean_dli', float('nan')):.2f} mol/m²/day"
-                if not np.isnan(dli_metrics.get("mean_dli", np.nan))
-                else "- Mean DLI: NA"
-            )
+            mean_dli = dli_metrics.get("mean_dli", np.nan)
+            if not np.isnan(mean_dli):
+                st.write(f"- Mean DLI: {mean_dli:.2f} mol/m²/day")
+            else:
+                st.write("- Mean DLI: NA")
             st.write(f"- Days in dataset: {dli_metrics.get('n_days', 0)}")
 
-        # Stress segments + plot
+        # Stress segments + interactive plot
         stress_segments = detect_stress_segments(
             df_work,
             ts_for_analysis,
@@ -641,15 +645,15 @@ class ClimateAnalyzerUI:
         )
 
         fig = plot_time_series(
-    timestamp=ts_for_analysis,
-    vpd=df_work[vpd_col],
-    ppfd=df_work[ppfd_col],
-    temp=df_work[temp_col],
-    stress_segments=stress_segments,
-)
+            timestamp=ts_for_analysis,
+            vpd=df_work[vpd_col],
+            ppfd=df_work[ppfd_col],
+            temp=df_work[temp_col],
+            stress_segments=stress_segments,
+        )
 
-st.markdown("### Time series view")
-st.plotly_chart(fig, use_container_width=True)
+        st.markdown("### Time series view")
+        st.plotly_chart(fig, use_container_width=True)
 
     @staticmethod
     def _format_metrics(label: str, m: dict, config: dict) -> str:
@@ -714,3 +718,4 @@ st.plotly_chart(fig, use_container_width=True)
             lines.append(" spikes: NA")
 
         return "\n".join(lines)
+
