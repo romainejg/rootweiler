@@ -79,12 +79,19 @@ def _overlay_grid_boxes(image_bgr: np.ndarray, boxes: List[Tuple[int, int, int, 
 # ---------------------------------------------------------------------
 def _run_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, object]]:
     """
-    Call the Roboflow workflow 'leafy' and return a dict with:
-      - 'predictions': list of polygon predictions
-    Returns None if anything fails.
+    Call the Roboflow 'leafy' workflow and adapt to your output schema:
+
+      - 'output2'  -> list of predictions (selector: $steps.model.predictions)
+      - 'output'   -> mask visualization image (selector: $steps.mask_visualization.image)
+
+    Returns dict:
+        {
+          "predictions": <list>,
+          "mask_image":  <np.ndarray> or None
+        }
+    or None on failure.
     """
     api_key = None
-    # Preferred: secrets
     if "ROBOFLOW_API_KEY" in st.secrets:
         api_key = st.secrets["ROBOFLOW_API_KEY"]
     elif "roboflow" in st.secrets and "api_key" in st.secrets["roboflow"]:
@@ -103,78 +110,110 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, object]]:
         st.info(f"Could not initialize Roboflow client ({type(e).__name__}). Falling back to color segmentation.")
         return None
 
-    # Write bytes to a temporary file; run_workflow expects a file path
-    tmp_path = "tmp_phenotype_image.jpg"
+    # Write bytes to a temp file – the SDK is happiest with a path
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+    os.close(tmp_fd)
     with open(tmp_path, "wb") as f:
         f.write(image_bytes)
 
     try:
         result = client.run_workflow(
-            workspace_name="rootweiler",
-            workflow_id="leafy",
-            images={"image": tmp_path},  # match your Roboflow example
+            workspace_name="rootweiler",   # <-- your workspace
+            workflow_id="leafy",           # <-- your workflow id
+            images={"image": tmp_path},
+            use_cache=True,
         )
-    except TypeError as e:
-        # Signature mismatch (older SDK)
-        st.info(
-            "Roboflow workflow call raised TypeError – most likely an older inference-sdk version.\n"
-            "Falling back to color-based segmentation."
-        )
-        return None
     except Exception as e:
         st.info(
-            f"Roboflow workflow call failed ({type(e).__name__}). "
+            f"Roboflow workflow call failed ({type(e).__name__}: {e}). "
             "Falling back to color-based segmentation."
         )
         return None
     finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
-    # result can be a list (like your JSON) or dict
+    # Result is usually a list with one item
     if isinstance(result, list) and len(result) > 0:
-        obj = result[0]
+        item = result[0]
     elif isinstance(result, dict):
-        obj = result
+        item = result
     else:
         st.info("Roboflow returned unexpected structure – using color-based segmentation.")
         return None
 
-    # Your workflow JSON uses "output2": { "image": {...}, "predictions": [...] }
-    output2 = obj.get("output2")
-    if not isinstance(output2, dict):
-        st.info("Roboflow output missing 'output2' with predictions – using color-based segmentation.")
-        return None
+    # -------------------------------
+    # 1) Predictions (your 'output2')
+    # -------------------------------
+    preds = None
+    if "output2" in item:
+        # According to your JSON, this is already $steps.model.predictions
+        preds = item["output2"]
 
-    preds = output2.get("predictions")
+    # Also support "model_predictions" if you later rename your output to match docs
+    if preds is None and "model_predictions" in item:
+        mp = item["model_predictions"]
+        if isinstance(mp, dict):
+            preds = mp.get("predictions") or mp.get("value")
+
     if not isinstance(preds, list) or len(preds) == 0:
         st.info("Roboflow returned no predictions – using color-based segmentation.")
         return None
 
-    return {"predictions": preds}
+    # -----------------------------------------
+    # 2) Mask visualization (your 'output')
+    # -----------------------------------------
+    mask_image = None
+    if "output" in item:
+        viz = item["output"]
+        # Depending on the field type, this may be a plain base64 string or a dict
+        if isinstance(viz, dict):
+            viz = viz.get("value") or viz.get("base64") or viz.get("data")
+        if isinstance(viz, str):
+            # Support optional data URL prefix
+            if viz.startswith("data:image"):
+                viz = viz.split(",", 1)[-1]
+            try:
+                img_bytes = base64.b64decode(viz)
+                mask_image = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+            except Exception:
+                mask_image = None
+
+    return {"predictions": preds, "mask_image": mask_image}
 
 
 def _mask_from_roboflow_predictions(
     image_shape: Tuple[int, int, int], predictions: List[dict]
 ) -> np.ndarray:
     """
-    Build a binary mask from Roboflow instance segmentation polygons.
-    All leaves are set to 255 in a single-channel mask.
+    Build a binary mask from instance-segmentation polygons returned
+    by Roboflow. All leaves -> 255 in a single-channel mask.
     """
     h, w, _ = image_shape
     mask = np.zeros((h, w), dtype=np.uint8)
 
     for pred in predictions:
-        pts = pred.get("points")
+        # Roboflow instance segmentation usually provides "points": [{"x": ..., "y": ...}, ...]
+        pts = pred.get("points") or pred.get("polygon") or pred.get("segmentation")
         if not pts or not isinstance(pts, list):
             continue
-        poly = np.array([[p["x"], p["y"]] for p in pts if "x" in p and "y" in p], dtype=np.int32)
-        if poly.shape[0] < 3:
+
+        poly = []
+        for p in pts:
+            # Be defensive about the key names
+            x = p.get("x") or p.get("X") or p.get("cx")
+            y = p.get("y") or p.get("Y") or p.get("cy")
+            if x is None or y is None:
+                continue
+            poly.append([int(round(x)), int(round(y))])
+
+        if len(poly) < 3:
             continue
-        cv2.fillPoly(mask, [poly], 255)
+
+        poly_np = np.array(poly, dtype=np.int32)
+        cv2.fillPoly(mask, [poly_np], 255)
 
     return mask
 
@@ -299,13 +338,14 @@ class PhenotypingUI:
 
         # --- Segmentation: Roboflow first, fallback to color ---
         rf_result = _run_roboflow_workflow(image_bytes)
-
+        
         if rf_result is not None:
             mask = _mask_from_roboflow_predictions(img_rgb.shape, rf_result["predictions"])
             st.caption("Leaf segmentation: Roboflow instance segmentation workflow (`leafy`).")
         else:
             mask = _color_based_mask(img_bgr)
             st.caption("Leaf segmentation: simple color-based fallback.")
+
 
         # Ensure binary mask
         mask_bin = np.where(mask > 0, 255, 0).astype(np.uint8)
