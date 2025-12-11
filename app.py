@@ -14,7 +14,7 @@ import leafAnalysis
 import jpgExtract
 import boxing
 import debugger
-
+import climate_analyzer
 
 # -----------------------
 # Helpers
@@ -381,17 +381,15 @@ def render_climate():
     st.markdown("## Climate")
     st.markdown(
         """
-        _Climate_ is meant as a bridge between environmental data and the crop you see in front of you.
+        _Climate_ is about understanding how the environment behaves over time,
+        not just at single points.
 
-        The long-term idea is to make it easier to:
-        - Organize climate exports from different systems  
-        - Look at patterns over time rather than single days  
-        - Connect climate views with the observations made in Phenotyping and Imaging  
-
-        Right now this is a placeholder for that direction.
+        Upload a climate log to explore VPD, PPFD and temperature patterns,
+        and see a climate type classification based on DLI.
         """
     )
-
+    st.markdown("---")
+    climate_analyzer.ClimateAnalyzerUI.render()
 
 # -----------------------
 # Section: Imaging
@@ -710,6 +708,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
