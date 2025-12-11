@@ -1,377 +1,452 @@
-# phenotyping_tools.py
+# phenotyping.py
 
-from __future__ import annotations
-
-from typing import List, Tuple, Optional
+import os
+from typing import List, Tuple, Optional, Dict, Any
 
 import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
+from PIL import Image
+
+try:
+    from inference_sdk import InferenceHTTPClient
+except ImportError:
+    InferenceHTTPClient = None  # we will check at runtime
+
+# -------------------------------
+# Roboflow configuration
+# -------------------------------
+
+WORKSPACE_NAME = "rootweiler"
+WORKFLOW_ID = "find-leaves-3"
+
+# This MUST match the node name in your workflow that outputs the leaf predictions.
+# After the first run, do st.write(result) to inspect the JSON,
+# then set this string to the correct key.
+LEAF_STEP_NAME = "leaf-segmentation"  # <-- adjust to your workflow node name
 
 
-# -----------------------------
-# Type alias
-# -----------------------------
+# -------------------------------
+# Grid calibration (1 cm squares)
+# -------------------------------
 
 BBox = Tuple[int, int, int, int]  # (x, y, w, h)
 
 
-# -----------------------------
-# Small helpers
-# -----------------------------
-
-def bgr_to_rgb(img: np.ndarray) -> np.ndarray:
-    """OpenCV loads as BGR, Streamlit expects RGB."""
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-
-# -----------------------------
-# Grid detection
-# -----------------------------
-
-def detect_grid_spacing(
-    image_bgr: np.ndarray,
-) -> Tuple[Optional[float], Optional[float], np.ndarray]:
+def estimate_grid_pixels_per_cm2(image_bgr: np.ndarray) -> Tuple[Optional[float], Optional[BBox]]:
     """
-    Detect 1 cm grid spacing using Hough line detection.
+    Estimate pixels per cm² from the grid board by finding many near-square
+    contours and using their median area.
 
     Returns:
-        pixels_per_cm2 (float or None),
-        pixels_per_cm (float or None),
-        overlay_rgb (np.ndarray) – original image with a green grid drawn.
+        (pixels_per_cm2, representative_square_bbox)
+        - pixels_per_cm2: average pixel area of one cm² square
+        - representative_square_bbox: (x, y, w, h) of one selected square for visualization
     """
-    h, w = image_bgr.shape[:2]
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
 
-    # Focus on central board region to avoid outer rulers & leaves
-    roi_x1 = int(0.10 * w)
-    roi_x2 = int(0.90 * w)
-    roi_y1 = int(0.05 * h)
-    roi_y2 = int(0.75 * h)
-    roi = image_bgr[roi_y1:roi_y2, roi_x1:roi_x2]
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    squares: List[BBox] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        # nearly square and not tiny
+        if abs(w - h) < 10 and w * h > 1000:
+            squares.append((x, y, w, h))
 
-    edges = cv2.Canny(gray, 40, 120, apertureSize=3)
+    if len(squares) < 20:
+        return None, None
 
-    lines = cv2.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 180,
-        threshold=130,
-        minLineLength=60,
-        maxLineGap=8,
+    areas = [w * h for (_, _, w, h) in squares]
+    median_area = float(np.median(areas))
+
+    # pick squares closest to median area
+    squares_sorted = sorted(squares, key=lambda s: abs((s[2] * s[3]) - median_area))
+    top = squares_sorted[:20]
+    avg_area = float(np.mean([w * h for (_, _, w, h) in top]))
+
+    # representative square for overlay: the first of the closest group
+    rep_square = squares_sorted[0]
+
+    pixels_per_cm2 = avg_area  # one grid square ≈ 1 cm²
+    return pixels_per_cm2, rep_square
+
+
+# -------------------------------
+# Roboflow helpers
+# -------------------------------
+
+def _get_roboflow_api_key() -> str:
+    """Get Roboflow API key from env or Streamlit secrets."""
+    api_key = os.getenv("ROBOFLOW_API_KEY", "")
+
+    if not api_key:
+        try:
+            if "ROBOFLOW_API_KEY" in st.secrets:
+                api_key = st.secrets["ROBOFLOW_API_KEY"]
+        except Exception:
+            pass
+
+    return api_key
+
+
+def run_roboflow_workflow(image_bgr: np.ndarray) -> Dict[str, Any]:
+    """
+    Send an image to the Roboflow workflow and return the raw JSON result.
+    """
+    if InferenceHTTPClient is None:
+        raise RuntimeError(
+            "inference-sdk is not installed. "
+            "Add `inference-sdk` to requirements.txt."
+        )
+
+    api_key = _get_roboflow_api_key()
+    if not api_key:
+        raise RuntimeError(
+            "ROBOFLOW_API_KEY not set. "
+            "Set it as an environment variable or in Streamlit secrets."
+        )
+
+    client = InferenceHTTPClient(
+        api_url="https://serverless.roboflow.com",
+        api_key=api_key,
     )
 
-    if lines is None or len(lines) < 10:
-        # Could not detect reliably
-        overlay = bgr_to_rgb(image_bgr.copy())
-        return None, None, overlay
+    # Roboflow HTTP client wants a file path
+    import tempfile
 
-    vertical_positions = []
-    horizontal_positions = []
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = tmp.name
+        cv2.imwrite(tmp_path, image_bgr)
 
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        if abs(x1 - x2) < 5:  # vertical line
-            cx = (x1 + x2) // 2
-            vertical_positions.append(cx)
-        elif abs(y1 - y2) < 5:  # horizontal line
-            cy = (y1 + y2) // 2
-            horizontal_positions.append(cy)
+    try:
+        result = client.run_workflow(
+            workspace_name=WORKSPACE_NAME,
+            workflow_id=WORKFLOW_ID,
+            images={"image": tmp_path},
+            use_cache=True,
+        )
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
-    spacings: List[float] = []
-
-    if len(vertical_positions) > 5:
-        xs = np.sort(np.array(vertical_positions))
-        dx = np.diff(xs)
-        spacings.extend(dx[(dx > 5) & (dx < 200)])
-
-    if len(horizontal_positions) > 5:
-        ys = np.sort(np.array(horizontal_positions))
-        dy = np.diff(ys)
-        spacings.extend(dy[(dy > 5) & (dy < 200)])
-
-    if len(spacings) < 5:
-        overlay = bgr_to_rgb(image_bgr.copy())
-        return None, None, overlay
-
-    spacing_px = float(np.median(spacings))
-    pixels_per_cm = spacing_px              # 1 grid cell ≈ 1 cm
-    pixels_per_cm2 = pixels_per_cm ** 2
-
-    # ---- Draw a grid overlay for user sanity check ----
-    overlay = image_bgr.copy()
-    step = int(round(spacing_px))
-
-    # Start grid roughly at same ROI offset
-    start_x = roi_x1
-    start_y = roi_y1
-    end_x = roi_x2
-    end_y = roi_y2
-
-    # Vertical lines
-    for x in range(start_x, end_x, step):
-        cv2.line(overlay, (x, start_y), (x, end_y), (0, 255, 0), 1)
-
-    # Horizontal lines
-    for y in range(start_y, end_y, step):
-        cv2.line(overlay, (start_x, y), (end_x, y), (0, 255, 0), 1)
-
-    return pixels_per_cm2, pixels_per_cm, bgr_to_rgb(overlay)
+    return result
 
 
-# -----------------------------
-# Leaf segmentation
-# -----------------------------
-
-def segment_leaves(
-    image_bgr: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, List[int], List[BBox]]:
+def extract_leaf_masks_from_workflow(
+    workflow_result: Dict[str, Any],
+    image_shape: Tuple[int, int, int],
+) -> List[np.ndarray]:
     """
-    Segment individual leaves using HSV threshold + morphology + watershed.
+    Convert Roboflow workflow output into a list of binary masks (one per leaf).
 
-    Returns
-    -------
-    leaf_mask : np.ndarray
-        Binary mask (255 = leaf, 0 = background)
-    labels : np.ndarray
-        Connected component labels (0 = background)
-    label_ids : List[int]
-        List of label IDs that we keep as "leaf objects"
-    bboxes : List[BBox]
-        Bounding boxes (x, y, w, h) for each label_id
+    You MUST adapt the indexing to match your workflow JSON structure.
+    After running once, do:
+
+        st.write(result)
+
+    and look for a structure like:
+        result["predictions"]["image"]["<some-step>"]["predictions"]
+
+    Then set LEAF_STEP_NAME to that step name.
     """
-    # HSV threshold for green-ish lettuce
+    h, w = image_shape[:2]
+
+    try:
+        step_output = workflow_result["predictions"]["image"][LEAF_STEP_NAME]
+        predictions = step_output["predictions"]
+    except Exception as e:
+        raise KeyError(
+            "Could not find leaf predictions in Roboflow result. "
+            "Open the JSON once with `st.write(result)` and update "
+            "extract_leaf_masks_from_workflow() indexing and LEAF_STEP_NAME.\n"
+            f"Error: {e}"
+        )
+
+    leaf_masks: List[np.ndarray] = []
+
+    for pred in predictions:
+        # For instance segmentation, Roboflow usually returns polygons in 'points'
+        points = pred.get("points")
+        if points:
+            poly = np.array(points, dtype=np.int32)
+            mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.fillPoly(mask, [poly], 255)
+            leaf_masks.append(mask)
+        else:
+            # If your model returns bitmasks instead, handle them here.
+            # E.g. base64-encoded or run-length encoded masks.
+            continue
+
+    return leaf_masks
+
+
+# -------------------------------
+# Fallback segmentation (HSV)
+# -------------------------------
+
+def simple_hsv_leaf_masks(image_bgr: np.ndarray) -> List[np.ndarray]:
+    """
+    Fallback segmentation using a simple green HSV threshold and connected components.
+    This is a backup if Roboflow is unavailable.
+    """
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    # These ranges are tuned for your board + lettuce, adjust if needed
     lower_green = np.array([25, 40, 40])
     upper_green = np.array([90, 255, 255])
     mask = cv2.inRange(hsv, lower_green, upper_green)
 
-    # Clean up grid lines & noise
-    kernel = np.ones((5, 5), np.uint8)
+    kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
 
-    # Distance transform to split overlapping leaves
-    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    num_labels, labels = cv2.connectedComponents(mask)
+    leaf_masks: List[np.ndarray] = []
+    for label in range(1, num_labels):
+        leaf_mask = np.zeros_like(mask)
+        leaf_mask[labels == label] = 255
+        if cv2.countNonZero(leaf_mask) > 5000:  # ignore tiny specks
+            leaf_masks.append(leaf_mask)
 
-    # Higher threshold -> fewer, more distinct seeds
-    _, sure_fg = cv2.threshold(dist, 0.35 * dist.max(), 255, 0)
-    sure_fg = np.uint8(sure_fg)
-
-    sure_bg = cv2.dilate(mask, kernel, iterations=3)
-    unknown = cv2.subtract(sure_bg, sure_fg)
-
-    # Markers for watershed
-    _, markers = cv2.connectedComponents(sure_fg)
-    markers = markers + 1  # ensure background is 1
-    markers[unknown == 255] = 0
-
-    markers = cv2.watershed(image_bgr, markers)
-
-    leaf_mask = np.zeros_like(mask)
-    leaf_mask[markers > 1] = 255
-
-    # Connected components on final mask
-    num_labels, labels = cv2.connectedComponents(leaf_mask)
-
-    label_ids: List[int] = []
-    bboxes: List[BBox] = []
-
-    for lab in range(1, num_labels):
-        ys, xs = np.where(labels == lab)
-        if ys.size == 0:
-            continue
-
-        x_min, x_max = xs.min(), xs.max()
-        y_min, y_max = ys.min(), ys.max()
-        w = x_max - x_min + 1
-        h = y_max - y_min + 1
-        area_px = w * h
-
-        # Filter tiny bits (change threshold if you want even smaller leaves)
-        if area_px < 2000:
-            continue
-
-        label_ids.append(lab)
-        bboxes.append((x_min, y_min, w, h))
-
-    return leaf_mask, labels, label_ids, bboxes
+    return leaf_masks
 
 
-def make_label_overlay(
-    labels: np.ndarray,
-    label_ids: List[int],
-    bboxes: List[BBox],
-) -> np.ndarray:
-    """Create a black background + white leaves + green bounding boxes."""
-    h, w = labels.shape
-    overlay = np.zeros((h, w, 3), dtype=np.uint8)
-    overlay[labels > 0] = (255, 255, 255)
-
-    for lab, (x, y, w_box, h_box) in zip(label_ids, bboxes):
-        cv2.rectangle(overlay, (x, y), (x + w_box, y + h_box), (0, 255, 0), 2)
-
-    return overlay
-
+# -------------------------------
+# Measurement helpers
+# -------------------------------
 
 def measure_leaves(
-    labels: np.ndarray,
-    label_ids: List[int],
-    bboxes: List[BBox],
-    pixels_per_cm2: Optional[float],
-    pixels_per_cm: Optional[float],
-) -> pd.DataFrame:
-    """Compute per-leaf area, height, and area:height ratio in cm units."""
-    rows = []
+    leaf_masks: List[np.ndarray],
+    pixels_per_cm2: float,
+) -> Tuple[List[Dict[str, float]], float, float]:
+    """
+    Given a list of per-leaf masks and a scale (px² / cm²),
+    compute per-leaf metrics and summary stats.
 
-    # If grid detection failed, we still compute pixel areas, but cm will be NA
-    scale_area = pixels_per_cm2 is not None and pixels_per_cm2 > 0
-    scale_len = pixels_per_cm is not None and pixels_per_cm > 0
+    Returns:
+        leaf_measurements, mean_area_cm2, sd_area_cm2
+    """
+    measurements: List[Dict[str, float]] = []
 
-    for idx, (lab, (x, y, w, h)) in enumerate(zip(label_ids, bboxes), start=1):
-        mask_leaf = (labels == lab)
-        area_px = int(mask_leaf.sum())
+    if not leaf_masks or pixels_per_cm2 <= 0:
+        return measurements, float("nan"), float("nan")
 
-        if scale_area:
-            area_cm2 = area_px / pixels_per_cm2  # type: ignore
-        else:
-            area_cm2 = float("nan")
+    px_per_cm = pixels_per_cm2 ** 0.5
 
-        if scale_len:
-            height_cm = h / pixels_per_cm  # type: ignore
-        else:
-            height_cm = float("nan")
+    for idx, mask in enumerate(leaf_masks, start=1):
+        area_px = int(cv2.countNonZero(mask))
+        if area_px == 0:
+            continue
 
-        if scale_area and scale_len and height_cm > 0:
-            ratio = area_cm2 / height_cm
-        else:
-            ratio = float("nan")
+        # bounding box for height/width
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            continue
+        cnt = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(cnt)
 
-        rows.append(
+        area_cm2 = area_px / pixels_per_cm2
+        height_cm = h / px_per_cm
+        width_cm = w / px_per_cm
+        ratio = area_cm2 / height_cm if height_cm > 0 else float("nan")
+
+        measurements.append(
             {
                 "Leaf ID": idx,
                 "Area (cm²)": area_cm2,
                 "Height (cm)": height_cm,
-                "Area : height": ratio,
+                "Width (cm)": width_cm,
+                "Area : Height (cm)": ratio,
             }
         )
 
-    df = pd.DataFrame(rows)
-    return df
+    if not measurements:
+        return measurements, float("nan"), float("nan")
+
+    areas = [m["Area (cm²)"] for m in measurements]
+    mean_area = float(np.mean(areas))
+    sd_area = float(np.std(areas))
+
+    return measurements, mean_area, sd_area
 
 
-# -----------------------------
-# Streamlit UI wrapper
-# -----------------------------
+def build_visualizations(
+    image_bgr: np.ndarray,
+    leaf_masks: List[np.ndarray],
+    grid_square: Optional[BBox],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Build:
+      - original_with_grid: original image with a rectangle over the selected grid square
+      - label_view: color overlay of leaf masks + boxes
+      - binary_view: union of leaves as white on black
+    """
+    h, w = image_bgr.shape[:2]
+
+    # Original with grid overlay
+    orig = image_bgr.copy()
+    if grid_square is not None:
+        x, y, gw, gh = grid_square
+        cv2.rectangle(orig, (x, y), (x + gw, y + gh), (0, 255, 255), 2)
+
+    # Label view
+    label_img = np.zeros_like(image_bgr)
+    colors = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (255, 0, 255),
+        (0, 255, 255),
+        (200, 128, 0),
+        (0, 128, 200),
+    ]
+
+    union_mask = np.zeros((h, w), dtype=np.uint8)
+
+    for i, mask in enumerate(leaf_masks):
+        color = colors[i % len(colors)]
+        label_img[mask > 0] = color
+        union_mask = cv2.bitwise_or(union_mask, mask)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            cnt = max(contours, key=cv2.contourArea)
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            cv2.rectangle(label_img, (x, y), (x + bw, y + bh), (255, 255, 255), 1)
+
+    # Binary union as 3-channel
+    binary_view = np.zeros_like(image_bgr)
+    binary_view[union_mask > 0] = (255, 255, 255)
+
+    # Convert BGR → RGB for Streamlit
+    orig_rgb = cv2.cvtColor(orig, cv2.COLOR_BGR2RGB)
+    label_rgb = cv2.cvtColor(label_img, cv2.COLOR_BGR2RGB)
+    binary_rgb = cv2.cvtColor(binary_view, cv2.COLOR_BGR2RGB)
+
+    return orig_rgb, label_rgb, binary_rgb
+
+
+# -------------------------------
+# Streamlit UI
+# -------------------------------
 
 class PhenotypingUI:
-    """Rootweiler phenotyping tools (single-image leaf phenotyping)."""
+    """Rootweiler phenotyping module."""
 
     @classmethod
     def render(cls):
-        st.subheader("Phenotyping – lettuce leaves on grid")
+        st.subheader("Leaf phenotyping")
 
         st.markdown(
             """
-            Upload an overhead image of leaves on the **1 cm grid board**.
+            Upload a **grid-board lettuce image**.  
+            Rootweiler will:
 
-            Rootweiler will try to:
-
-            - Detect the grid and convert pixel area to **cm²**
-            - Segment individual leaves (even when overlapping)
-            - Measure per-leaf **area**, **height**, and **area:height**  
-            - Summarise average leaf size and variability
+            - Auto-calibrate from the 1 cm squares  
+            - Segment leaves (Roboflow workflow)  
+            - Report per-leaf **area (cm²)**, **height (cm)**, **width (cm)**, and **area:height**  
+            - Summarize **leaf count, mean leaf area, and area deviation**
             """
         )
 
         uploaded = st.file_uploader(
-            "Upload image (JPG / PNG)",
+            "Upload phenotyping image",
             type=["jpg", "jpeg", "png"],
-            key="phenotype_image",
         )
 
         if uploaded is None:
-            st.info("Upload an image to get started.")
+            st.info("Upload an image to begin.")
             return
 
-        # Read image into OpenCV BGR format
-        file_bytes = np.asarray(bytearray(uploaded.read()), dtype=np.uint8)
-        image_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        if image_bgr is None:
-            st.error("Could not read this image.")
-            return
+        # Read image with PIL → numpy (BGR for OpenCV)
+        pil_img = Image.open(uploaded).convert("RGB")
+        image_rgb = np.array(pil_img)
+        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
-        # --- Grid detection ---
-        pixels_per_cm2, pixels_per_cm, grid_overlay_rgb = detect_grid_spacing(image_bgr)
+        # --- 1) Grid calibration ---
+
+        pixels_per_cm2, grid_square = estimate_grid_pixels_per_cm2(image_bgr)
 
         with st.expander("Grid calibration (1 cm squares)", expanded=True):
             if pixels_per_cm2 is None:
                 st.error(
-                    "Could not automatically detect grid spacing. "
-                    "Make sure the board is visible and the grid lines are sharp."
+                    "Could not reliably detect the grid squares.\n"
+                    "Check that the board is visible and well-lit."
                 )
             else:
-                px_cm = pixels_per_cm if pixels_per_cm is not None else float("nan")
+                px_per_cm = pixels_per_cm2 ** 0.5
                 st.success(
-                    f"Estimated grid spacing: ~**{px_cm:.1f} px per 1 cm** "
-                    f"(1 cm² ≈ {pixels_per_cm2:.0f} px²)."
+                    f"Estimated grid spacing: **{px_per_cm:.2f} px per 1 cm** "
+                    f"(~{pixels_per_cm2:.0f} px² per cm²)"
                 )
-            st.image(
-                grid_overlay_rgb,
-                caption="Original image with detected grid overlay",
-                use_column_width=True,
-            )
+                st.caption(
+                    "The yellow rectangle over the original image shows one of the "
+                    "squares used for calibration."
+                )
 
-        # --- Leaf segmentation ---
-        leaf_mask, labels, label_ids, bboxes = segment_leaves(image_bgr)
+        if pixels_per_cm2 is None or pixels_per_cm2 <= 0:
+            st.stop()
 
-        if not label_ids:
-            st.error(
-                "No leaves detected. You may need stronger contrast between leaves and background."
-            )
+        # --- 2) Leaf segmentation via Roboflow (with fallback) ---
+
+        use_roboflow = st.checkbox("Use Roboflow leaf model (recommended)", value=True)
+
+        if use_roboflow:
+            try:
+                rf_result = run_roboflow_workflow(image_bgr)
+                leaf_masks = extract_leaf_masks_from_workflow(rf_result, image_bgr.shape)
+            except Exception as e:
+                st.error(
+                    "Roboflow workflow failed or is not configured correctly. "
+                    "Falling back to simple HSV segmentation.\n\n"
+                    f"Details: {e}"
+                )
+                leaf_masks = simple_hsv_leaf_masks(image_bgr)
+        else:
+            leaf_masks = simple_hsv_leaf_masks(image_bgr)
+
+        if not leaf_masks:
+            st.error("No leaves were detected. Check image or model settings.")
             return
 
-        label_overlay = make_label_overlay(labels, label_ids, bboxes)
+        # --- 3) Measurements ---
 
-        # --- Visual overview ---
+        measurements, mean_area, sd_area = measure_leaves(leaf_masks, pixels_per_cm2)
+
+        # --- 4) Visualizations ---
+
+        orig_vis, label_vis, binary_vis = build_visualizations(
+            image_bgr, leaf_masks, grid_square
+        )
+
         st.markdown("### Segmentation overview")
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        c1, c2, c3 = st.columns(3)
+        with c1:
             st.markdown("**Original image**")
-            st.image(bgr_to_rgb(image_bgr), use_column_width=True)
-        with col2:
-            st.markdown("**Leaf labels (bounding boxes)**")
-            st.image(bgr_to_rgb(label_overlay), use_column_width=True)
-        with col3:
-            st.markdown("**Binary leaf mask**")
-            st.image(leaf_mask, clamp=True, use_column_width=True)
+            st.image(orig_vis, use_column_width=True)
+        with c2:
+            st.markdown("**Leaf labels**")
+            st.image(label_vis, use_column_width=True)
+        with c3:
+            st.markdown("**Binary mask (all leaves)**")
+            st.image(binary_vis, use_column_width=True)
 
-        # --- Measurements ---
-        df = measure_leaves(labels, label_ids, bboxes, pixels_per_cm2, pixels_per_cm)
+        # --- 5) Measurement table ---
 
         st.markdown("### Leaf measurements")
-        st.dataframe(df.style.format({"Area (cm²)": "{:.2f}", "Height (cm)": "{:.2f}", "Area : height": "{:.2f}"}),
-                     use_container_width=True)
 
-        # Summary stats if we have cm²
-        if pixels_per_cm2 is not None and not df["Area (cm²)"].isna().all():
-            mean_area = df["Area (cm²)"].mean()
-            std_area = df["Area (cm²)"].std()
-            mean_ratio = df["Area : height"].mean()
+        if measurements:
+            df = pd.DataFrame(measurements)
+            st.dataframe(df.style.format({"Area (cm²)": "{:.2f}", "Height (cm)": "{:.2f}", "Width (cm)": "{:.2f}", "Area : Height (cm)": "{:.2f}"}),
+                         use_container_width=True)
 
             st.markdown("#### Summary")
-            st.write(f"- Leaf count: **{len(df)}**")
-            st.write(f"- Average area: **{mean_area:.2f} cm²**")
-            st.write(f"- Area standard deviation: **{std_area:.2f} cm²**")
-            if not np.isnan(mean_ratio):
-                st.write(f"- Average area:height ratio: **{mean_ratio:.2f}**")
+            st.write(f"- **Leaf count:** {len(measurements)}")
+            if not np.isnan(mean_area):
+                st.write(f"- **Average leaf area:** {mean_area:.2f} cm²")
+            if not np.isnan(sd_area):
+                st.write(f"- **Leaf area standard deviation:** {sd_area:.2f} cm²")
         else:
-            st.caption(
-                "Grid spacing was not detected, so areas are in pixels only. "
-                "Try another image or adjust the board visibility."
-            )
+            st.info("No valid leaf measurements were produced.")
