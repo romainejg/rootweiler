@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
@@ -10,6 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import streamlit as st
+import pandas as pd
 
 
 # -----------------------------
@@ -24,71 +24,91 @@ class LeafMeasurement:
     area_per_height: float
 
 
-# -----------------------------
-# Grid detection (1 cm squares)
-# -----------------------------
+# ============================================================
+# GRID DETECTION – 1 cm SQUARE BOARD
+# ============================================================
+
+def _line_centers_from_binary(line_img: np.ndarray, axis: int) -> Optional[np.ndarray]:
+    """
+    Given a binary image with lines, collapse along axis and return
+    the centres (in pixels) of each distinct line.
+    """
+    # projection along axis
+    projection = line_img.sum(axis=axis)
+    idx = np.where(projection > 0)[0]
+    if len(idx) < 5:
+        return None
+
+    centers = []
+    start = idx[0]
+    prev = idx[0]
+    for i in idx[1:]:
+        if i == prev + 1:
+            prev = i
+        else:
+            centers.append((start + prev) / 2.0)
+            start = prev = i
+    centers.append((start + prev) / 2.0)
+
+    centers = np.array(centers)
+    centers.sort()
+    return centers
+
 
 def detect_grid_spacing_px_per_cm(img_bgr: np.ndarray) -> Optional[float]:
     """
-    Detect grid spacing (in pixels per centimetre) from a checkerboard-like
-    background with 1 cm squares.
+    Detect grid spacing (pixels per centimetre) assuming a 1 cm square grid.
 
-    Returns px_per_cm or None if detection fails.
+    Approach:
+      * Convert to grayscale + equalize
+      * Threshold to get dark grid lines as white
+      * Use morphology to pull out horizontal & vertical line images
+      * Find line centres and compute median spacing between neighbours
     """
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    # Enhance grid lines
-    gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(gray_blur, 50, 150, apertureSize=3)
+    gray = cv2.equalizeHist(gray)
 
-    # Hough lines
-    lines = cv2.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 180,
-        threshold=150,
-        minLineLength=80,
-        maxLineGap=10,
+    # Invert: grid lines become white on black background
+    _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    h, w = bw.shape
+
+    # Kernels sized relative to image: we want to pick up multi-cm long lines
+    vert_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (1, max(15, h // 40))
     )
-    if lines is None or len(lines) < 10:
-        return None
+    horiz_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (max(15, w // 40), 1)
+    )
 
-    vertical_x = []
-    horizontal_y = []
+    # Extract vertical lines
+    vertical = cv2.erode(bw, vert_kernel, iterations=1)
+    vertical = cv2.dilate(vertical, vert_kernel, iterations=1)
 
-    for l in lines:
-        x1, y1, x2, y2 = l[0]
-        dx = x2 - x1
-        dy = y2 - y1
-        if dx == 0 and abs(dy) > 10:
-            # perfect vertical
-            vertical_x.append(x1)
-        elif dy == 0 and abs(dx) > 10:
-            # perfect horizontal
-            horizontal_y.append(y1)
-        else:
-            # classify by slope
-            if abs(dx) < 5 and abs(dy) > 20:
-                vertical_x.append(int((x1 + x2) / 2))
-            elif abs(dy) < 5 and abs(dx) > 20:
-                horizontal_y.append(int((y1 + y2) / 2))
+    # Extract horizontal lines
+    horizontal = cv2.erode(bw, horiz_kernel, iterations=1)
+    horizontal = cv2.dilate(horizontal, horiz_kernel, iterations=1)
 
-    if len(vertical_x) < 5 and len(horizontal_y) < 5:
-        return None
+    # Find line centres
+    centers_v = _line_centers_from_binary(vertical, axis=0)
+    centers_h = _line_centers_from_binary(horizontal, axis=1)
 
-    def spacing_from_positions(pos_list: List[int]) -> Optional[float]:
-        if len(pos_list) < 5:
+    def spacing_from_centers(centers: np.ndarray) -> Optional[float]:
+        if centers is None or len(centers) < 5:
             return None
-        pos = np.array(sorted(pos_list))
-        diffs = np.diff(pos)
-        # Filter out very large gaps (borders) by robust statistics
+        diffs = np.diff(centers)
+        diffs = diffs[diffs > 1]  # ignore zero/1-pixel noise
+        if len(diffs) == 0:
+            return None
         median = np.median(diffs)
+        # keep only diffs near the median (to ignore borders / big gaps)
         diffs = diffs[(diffs > 0.5 * median) & (diffs < 1.5 * median)]
         if len(diffs) == 0:
             return None
         return float(np.median(diffs))
 
-    sp_v = spacing_from_positions(vertical_x)
-    sp_h = spacing_from_positions(horizontal_y)
+    sp_v = spacing_from_centers(centers_v)
+    sp_h = spacing_from_centers(centers_h)
 
     if sp_v and sp_h:
         return float((sp_v + sp_h) / 2.0)
@@ -107,8 +127,8 @@ def draw_grid_overlay(
     thickness: int = 1,
 ) -> np.ndarray:
     """
-    Draw a coarse grid overlay every 1 cm on the image so the user can
-    visually confirm the calibration.
+    Draw grid lines at 1 cm spacing over the original image so you
+    can visually see if calibration looks right.
     """
     overlay = img_bgr.copy()
     h, w = overlay.shape[:2]
@@ -117,7 +137,7 @@ def draw_grid_overlay(
     if step <= 0:
         return overlay
 
-    # Start near the center to avoid border inaccuracies
+    # Start near the centre to avoid noisy outer region
     cx, cy = w // 2, h // 2
 
     # vertical lines
@@ -143,111 +163,107 @@ def draw_grid_overlay(
     return overlay
 
 
-# -----------------------------
-# Leaf segmentation
-# -----------------------------
+# ============================================================
+# LEAF SEGMENTATION
+# ============================================================
 
 def create_leaf_mask(img_bgr: np.ndarray) -> np.ndarray:
     """
     Create a binary mask for leafy material.
 
     Strategy:
-    - Convert to HSV
-    - Threshold on saturation + value to remove white/gray grid
-    - Optional hue band for vegetative colors
-    - Morphological clean-up
+      * HSV conversion
+      * Threshold on saturation + value to remove white grid
+      * Hue band for vegetative colours
+      * Morphological clean-up + removal of tiny specks
     """
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     h, s, v = cv2.split(hsv)
 
-    # Basic thresholds – tuned to "greenish" but also works for other foliage
-    # S > 40 to avoid white background, V < 245 to avoid specular glare.
-    leaf_mask = (s > 40) & (v < 245)
+    # basic thresholds to knock out white/grey board
+    leaf_mask = (s > 35) & (v < 245)
 
-    # Optional hue band (rough green range) – keeps tag mostly out
-    # convert bool to uint8 for bitwise ops
-    hue_mask1 = (h > 25) & (h < 100)  # green-ish
-    leaf_mask = (leaf_mask & hue_mask1).astype(np.uint8) * 255
+    # Green-ish hue band (roughly 25–100 deg)
+    green_band = (h > 25) & (h < 100)
+    leaf_mask = (leaf_mask & green_band).astype(np.uint8) * 255
 
-    # Morphological operations
     kernel = np.ones((3, 3), np.uint8)
     leaf_mask = cv2.morphologyEx(leaf_mask, cv2.MORPH_OPEN, kernel, iterations=1)
     leaf_mask = cv2.morphologyEx(leaf_mask, cv2.MORPH_CLOSE, kernel, iterations=3)
 
-    # Remove very small specks
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(leaf_mask, connectivity=8)
+    # Remove very small blobs (threshold dropped a bit so small leaves survive)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        leaf_mask, connectivity=8
+    )
     cleaned = np.zeros_like(leaf_mask)
-    for label in range(1, num_labels):
-        area = stats[label, cv2.CC_STAT_AREA]
-        if area > 300:  # ignore tiny blobs
-            cleaned[labels == label] = 255
+    for lab in range(1, num_labels):
+        area = stats[lab, cv2.CC_STAT_AREA]
+        if area > 150:  # was 300 – lowered to keep small leaves
+            cleaned[labels == lab] = 255
 
     return cleaned
 
 
-def split_leaves_watershed(img_bgr: np.ndarray, leaf_mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def split_leaves_watershed(
+    img_bgr: np.ndarray,
+    leaf_mask: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Use marker-based watershed to split overlapping leaves.
+    Marker-based watershed to split overlapping leaves.
 
     Returns:
-      - markers (int32 array with label IDs)
-      - cleaned_leaf_mask (uint8)
+      markers        – int32 label image
+      cleaned_mask   – uint8 binary mask
     """
-    # distance transform to find leaf "cores"
     dist = cv2.distanceTransform(leaf_mask, cv2.DIST_L2, 5)
-    # threshold at 0.4 of max distance – controls how aggressive splitting is
-    _, sure_fg = cv2.threshold(dist, 0.4 * dist.max(), 255, 0)
+    # Slightly more aggressive split (0.35 instead of 0.4)
+    _, sure_fg = cv2.threshold(dist, 0.35 * dist.max(), 255, 0)
     sure_fg = np.uint8(sure_fg)
 
-    # sure background by dilation
     kernel = np.ones((3, 3), np.uint8)
     sure_bg = cv2.dilate(leaf_mask, kernel, iterations=3)
     unknown = cv2.subtract(sure_bg, sure_fg)
 
-    # markers for watershed
     num_markers, markers = cv2.connectedComponents(sure_fg)
     markers = markers + 1
     markers[unknown == 255] = 0
 
-    img_for_ws = img_bgr.copy()
-    cv2.watershed(img_for_ws, markers)
+    ws_img = img_bgr.copy()
+    cv2.watershed(ws_img, markers)
 
-    # markers == -1 are boundaries; treat anything >1 as leaf
-    cleaned_leaf_mask = np.zeros_like(leaf_mask)
-    cleaned_leaf_mask[markers > 1] = 255
+    cleaned_mask = np.zeros_like(leaf_mask)
+    cleaned_mask[markers > 1] = 255
 
-    return markers, cleaned_leaf_mask
+    return markers, cleaned_mask
 
 
-def measure_leaves(
-    markers: np.ndarray,
-    px_per_cm: float,
-) -> List[LeafMeasurement]:
+def measure_leaves(markers: np.ndarray, px_per_cm: float) -> List[LeafMeasurement]:
     """
     Compute area (cm²), height (cm), and area:height for each leaf label.
     """
     measurements: List[LeafMeasurement] = []
 
     unique_labels = np.unique(markers)
-    leaf_labels = [lab for lab in unique_labels if lab > 1]  # >1 => skip background/boundary
+    leaf_labels = [lab for lab in unique_labels if lab > 1]
 
-    for idx, lab in enumerate(sorted(leaf_labels), start=1):
+    idx = 1
+    for lab in sorted(leaf_labels):
         mask_leaf = (markers == lab).astype(np.uint8) * 255
-        # skip tiny labels
-        if cv2.countNonZero(mask_leaf) < 500:
+        if cv2.countNonZero(mask_leaf) < 200:  # lower threshold so small leaves count
             continue
 
-        contours, _ = cv2.findContours(mask_leaf, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            mask_leaf, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         if not contours:
             continue
 
         contour = max(contours, key=cv2.contourArea)
         area_px = cv2.contourArea(contour)
         x, y, w, h = cv2.boundingRect(contour)
-        height_px = h
 
         area_cm2 = area_px / (px_per_cm ** 2)
-        height_cm = height_px / px_per_cm
+        height_cm = h / px_per_cm
         area_per_height = area_cm2 / height_cm if height_cm > 0 else 0.0
 
         measurements.append(
@@ -258,6 +274,7 @@ def measure_leaves(
                 area_per_height=float(area_per_height),
             )
         )
+        idx += 1
 
     return measurements
 
@@ -268,21 +285,23 @@ def create_label_overlay(
     measurements: List[LeafMeasurement],
 ) -> np.ndarray:
     """
-    Draw bounding boxes + IDs for each leaf on a black background.
+    Draw bounding boxes and ID labels on a black background.
     """
     overlay = np.zeros_like(img_bgr)
-    marker_to_idx = {m.leaf_id: m for m in measurements}
 
+    # Map order of measurement IDs onto marker labels by area
     unique_labels = np.unique(markers)
     leaf_labels = [lab for lab in unique_labels if lab > 1]
 
     label_id = 1
     for lab in sorted(leaf_labels):
         mask_leaf = (markers == lab).astype(np.uint8) * 255
-        if cv2.countNonZero(mask_leaf) < 500:
+        if cv2.countNonZero(mask_leaf) < 200:
             continue
 
-        contours, _ = cv2.findContours(mask_leaf, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            mask_leaf, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         if not contours:
             continue
 
@@ -306,9 +325,9 @@ def create_label_overlay(
     return overlay
 
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
+# ============================================================
+# STREAMLIT UI
+# ============================================================
 
 class PhenotypingUI:
     """Rootweiler leaf phenotyping tool."""
@@ -342,45 +361,37 @@ class PhenotypingUI:
         img_rgb = np.array(pil_img)
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-        # --- Grid detection ---
+        # -------- Grid detection (NO manual adjustment) --------
         st.markdown("### Grid calibration (1 cm squares)")
 
-        auto_px_per_cm = detect_grid_spacing_px_per_cm(img_bgr)
+        px_per_cm = detect_grid_spacing_px_per_cm(img_bgr)
 
-        if auto_px_per_cm is not None:
-            st.success(f"Auto-detected grid spacing: ~{auto_px_per_cm:.1f} px per 1 cm")
-            default_px = float(auto_px_per_cm)
-        else:
-            st.warning("Could not auto-detect grid spacing reliably. Please enter manually.")
-            default_px = 50.0
+        if px_per_cm is None or px_per_cm <= 0:
+            st.error(
+                "Could not automatically detect grid spacing. "
+                "Make sure the board is visible and the grid lines are sharp."
+            )
+            # Show the image anyway for debugging
+            st.image(img_rgb, caption="Uploaded image", use_column_width=True)
+            return
 
-        px_per_cm = st.number_input(
-            "Pixels per centimetre (override if needed)",
-            min_value=1.0,
-            max_value=1000.0,
-            value=default_px,
-            step=1.0,
-        )
+        st.success(f"Detected grid spacing: ~{px_per_cm:.1f} pixels per 1 cm")
 
-        # Grid overlay for sanity check
+        # Overlay grid so you can visually confirm calibration
         overlay_bgr = draw_grid_overlay(img_bgr, px_per_cm)
         overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
-        st.caption("Overlay of 1 cm grid (green lines) to check calibration.")
+        st.caption("Green overlay lines show the detected 1 cm spacing.")
         st.image(overlay_rgb, use_column_width=True)
 
-        # --- Segmentation & measurements ---
+        # -------- Segmentation + measurements --------
         leaf_mask = create_leaf_mask(img_bgr)
         markers, cleaned_mask = split_leaves_watershed(img_bgr, leaf_mask)
-        measurements = measure_leaves(markers, px_per_cm=px_per_cm)
+        measurements = measure_leaves(markers, px_per_cm)
 
-        # Binary mask for display
         mask_display = cv2.cvtColor(cleaned_mask, cv2.COLOR_GRAY2RGB)
-
-        # Label overlay
         label_overlay_bgr = create_label_overlay(img_bgr, markers, measurements)
         label_overlay_rgb = cv2.cvtColor(label_overlay_bgr, cv2.COLOR_BGR2RGB)
 
-        # Original RGB for display
         st.markdown("### Segmentation overview")
         c1, c2, c3 = st.columns(3)
 
@@ -396,17 +407,16 @@ class PhenotypingUI:
             st.markdown("**Binary mask**")
             st.image(mask_display, use_column_width=True)
 
-        # --- Measurements table ---
+        # -------- Measurements table --------
         st.markdown("### Leaf measurements")
 
         if not measurements:
             st.warning(
                 "No leaves were confidently segmented. "
-                "Try a clearer image, adjust lighting, or tweak the grid calibration."
+                "Try a clearer image or a different background."
             )
             return
 
-        # Build table
         rows = []
         for m in measurements:
             rows.append(
@@ -418,23 +428,22 @@ class PhenotypingUI:
                 }
             )
 
-        import pandas as pd
-
         df = pd.DataFrame(rows)
         st.dataframe(df, use_container_width=True)
 
-        # Summary stats
-        area_vals = np.array([m.area_cm2 for m in measurements])
-        height_vals = np.array([m.height_cm for m in measurements])
+        # Summary stats (cm, cm² only – no pixels)
+        areas = np.array([m.area_cm2 for m in measurements])
+        heights = np.array([m.height_cm for m in measurements])
 
         st.markdown("#### Summary statistics")
         st.write(f"- **Leaf count:** {len(measurements)}")
-        st.write(f"- **Average leaf area:** {area_vals.mean():.2f} cm²")
-        st.write(f"- **Leaf area standard deviation:** {area_vals.std(ddof=1):.2f} cm²")
-        st.write(f"- **Average leaf height:** {height_vals.mean():.2f} cm")
-        st.write(f"- **Leaf height standard deviation:** {height_vals.std(ddof=1):.2f} cm")
+        st.write(f"- **Average leaf area:** {areas.mean():.2f} cm²")
+        st.write(f"- **Leaf area standard deviation:** {areas.std(ddof=1):.2f} cm²")
+        st.write(f"- **Average leaf height:** {heights.mean():.2f} cm")
+        st.write(f"- **Leaf height standard deviation:** {heights.std(ddof=1):.2f} cm")
 
         st.caption(
-            "Area is estimated from the segmented silhouette and the detected grid spacing. "
-            "If calibration looks off, adjust the pixels-per-cm value and rerun."
+            "All metrics are derived from the segmented silhouette and the "
+            "detected grid spacing. If the green overlay lines look aligned with "
+            "the board squares, the cm² values should be in the right ballpark."
         )
