@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+
 import io
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict, Any
@@ -168,8 +171,11 @@ def hsv_segment_leaves(image_bgr: np.ndarray) -> List[BBox]:
 
 def run_leaf_segmentation_roboflow(image_bytes: bytes) -> Optional[Dict[str, Any]]:
     """
-    Run your Roboflow workflow on the given image bytes.
-    Returns the JSON result or None if it fails.
+    Run your Roboflow workflow on the given image.
+
+    The InferenceHTTPClient expects file paths or URLs in `images`,
+    not raw bytes, so we write the bytes to a temporary file and pass
+    that path.
     """
     if not HAS_ROBOFLOW or InferenceHTTPClient is None:
         return None
@@ -189,12 +195,19 @@ def run_leaf_segmentation_roboflow(image_bytes: bytes) -> Optional[Dict[str, Any
         api_key=api_key,
     )
 
+    tmp_path = None
     try:
-        # NOTE: no `use_cache` arg here – your SDK version doesn’t support it
+        # Write bytes to a temp file
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp.write(image_bytes)
+            tmp.flush()
+            tmp_path = tmp.name
+
+        # IMPORTANT: pass the file path, not bytes
         result = client.run_workflow(
             workspace_name="rootweiler",
             workflow_id="find-leaves-3",
-            images={"image": image_bytes},
+            images={"image": tmp_path},
         )
         return result
 
@@ -205,6 +218,15 @@ def run_leaf_segmentation_roboflow(image_bytes: bytes) -> Optional[Dict[str, Any
             f"Details: {e}"
         )
         return None
+
+    finally:
+        # Clean up temporary file
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
 
 
 def parse_roboflow_boxes(
