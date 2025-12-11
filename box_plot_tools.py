@@ -7,6 +7,12 @@ import seaborn as sns
 from matplotlib.ticker import MultipleLocator
 from io import BytesIO
 
+import streamlit as st
+
+
+# ------------------------------------------------------
+# Core plotting logic (no UI)
+# ------------------------------------------------------
 
 def generate_box_plot_figure(
     data: pd.DataFrame,
@@ -18,9 +24,6 @@ def generate_box_plot_figure(
 ) -> plt.Figure:
     """
     Create a box + strip plot figure (no GUI, no saving, just returns a Matplotlib Figure).
-
-    This is the logic from your original `generate_box_plot`, adapted to work
-    in a headless environment (e.g. Streamlit).
     """
     if not all([x_column, y_column, plot_title, x_label, y_label]):
         raise ValueError("x_column, y_column, plot_title, x_label, and y_label must all be provided")
@@ -152,3 +155,110 @@ def save_box_plot_png(
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
+
+
+# ------------------------------------------------------
+# Streamlit UI wrapper for the Box Plot tool
+# ------------------------------------------------------
+
+class BoxPlotUI:
+    """Streamlit UI for the Box Plot builder (Data & Graphs section)."""
+
+    @classmethod
+    def render(cls):
+        st.subheader("Box plot builder")
+
+        st.markdown(
+            """
+            Upload an Excel file, choose a **sheet**, pick your X and Y columns,
+            and Rootweiler will generate a publication-ready box + strip plot.
+            """
+        )
+
+        uploaded = st.file_uploader(
+            "Upload Excel file",
+            type=["xlsx", "xls"],
+            key="boxplot_excel_uploader",
+        )
+
+        if uploaded is None:
+            st.info("Upload an Excel file to begin.")
+            return
+
+        # Read sheet names
+        try:
+            excel = pd.ExcelFile(uploaded)
+        except Exception as e:
+            st.error(f"Could not read Excel file: {e}")
+            return
+
+        # Let the user choose the sheet
+        sheet_name = st.selectbox(
+            "Select worksheet",
+            options=excel.sheet_names,
+            index=0,
+        )
+
+        # Parse selected sheet into DataFrame
+        try:
+            df = excel.parse(sheet_name=sheet_name)
+        except Exception as e:
+            st.error(f"Could not read sheet '{sheet_name}': {e}")
+            return
+
+        if df.empty:
+            st.warning("Selected sheet appears to be empty.")
+            return
+
+        st.markdown("#### Data preview")
+        st.dataframe(df.head(), use_container_width=True)
+
+        columns = df.columns.tolist()
+        if len(columns) < 2:
+            st.warning("Need at least two columns in the sheet to build a box plot.")
+            return
+
+        st.markdown("#### Plot configuration")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            x_column = st.selectbox("X-axis (group/category)", options=columns)
+            x_label = st.text_input("X-axis label", value=x_column)
+
+        with c2:
+            y_column = st.selectbox("Y-axis (numeric)", options=columns)
+            y_label = st.text_input("Y-axis label", value=y_column)
+
+        plot_title = st.text_input("Plot title", value=f"Box plot of {y_column} by {x_column}")
+
+        if st.button("Generate box plot", type="primary"):
+            try:
+                fig = generate_box_plot_figure(
+                    data=df,
+                    x_column=x_column,
+                    y_column=y_column,
+                    plot_title=plot_title,
+                    x_label=x_label,
+                    y_label=y_label,
+                )
+            except Exception as e:
+                st.error(f"Could not generate plot: {e}")
+                return
+
+            st.markdown("#### Box plot")
+            st.pyplot(fig, use_container_width=True)
+
+            # Prepare PNG for download
+            buf = BytesIO()
+            fig.savefig(buf, format="png", bbox_inches="tight")
+            buf.seek(0)
+
+            st.download_button(
+                "Download plot as PNG",
+                data=buf,
+                file_name="rootweiler_box_plot.png",
+                mime="image/png",
+            )
+
+            # Close the figure to free memory on rerun
+            plt.close(fig)
