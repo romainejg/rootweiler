@@ -1,5 +1,3 @@
-# calculators.py
-
 import streamlit as st
 import numpy as np
 
@@ -297,6 +295,161 @@ class GutterPlantDensityCalculator:
         else:
             st.info("Enter non-zero values for length, widths, spacing and plants per gutter to see the result.")
 
+
+class CanopyClosureCalculator:
+    """
+    Estimate days until canopy closure based on:
+    - Plant density (plants/m²)
+    - Average air temperature (°C)
+    - Average PPFD during the photoperiod (µmol·m⁻²·s⁻¹)
+    - Photoperiod length (hours of light per day)
+
+    This is a simple, crop-agnostic toy model mainly tuned for leafy crops
+    in the ~15–30 plants/m² range. Treat results as an approximate guide.
+    """
+
+    # Target leaf area index (LAI) at which we say "canopy closed"
+    BASE_LAI_TARGET = 3.0  # typical for lettuce-type leafy crops
+
+    # Leaf area produced per plant per mol DLI at reference temp (20 °C)
+    # Tuned so that: ~25 plants/m², ~15 mol DLI, ~20 °C  => ~18 days to closure
+    ALPHA_LEAF_PER_DLI = 4.5e-4  # m² leaf / plant / mol DLI
+
+    @staticmethod
+    def temp_factor(temp_c: float) -> float:
+        """
+        Simple temperature response factor around 20 °C.
+        ~4% change in growth rate per °C, clipped to a reasonable range.
+        """
+        factor = 1.0 + 0.04 * (temp_c - 20.0)
+        # Avoid silly extremes
+        return float(np.clip(factor, 0.4, 1.6))
+
+    @staticmethod
+    def compute_days_to_closure(
+        density_plants_m2: float,
+        temp_c: float,
+        ppfd: float,
+        photoperiod_h: float = 16.0,
+    ) -> float:
+        """
+        Estimate days until canopy closure.
+
+        Steps:
+        - DLI = f(PPFD, photoperiod)
+        - Daily LAI gain = density * alpha * DLI * temp_factor
+        - Days = LAI_target / daily_LAI_gain
+        """
+        if (
+            density_plants_m2 <= 0
+            or temp_c <= -20  # sanity
+            or ppfd <= 0
+            or photoperiod_h <= 0
+        ):
+            return np.nan
+
+        # Convert PPFD + photoperiod -> DLI (mol·m⁻²·day⁻¹)
+        dli = DLICalculator.compute_dli(ppfd, photoperiod_h)
+
+        if dli <= 0:
+            return np.nan
+
+        fT = CanopyClosureCalculator.temp_factor(temp_c)
+        lai_target = CanopyClosureCalculator.BASE_LAI_TARGET
+        alpha = CanopyClosureCalculator.ALPHA_LEAF_PER_DLI
+
+        # Daily LAI gain per m² ground
+        daily_lai_gain = density_plants_m2 * alpha * dli * fT
+
+        if daily_lai_gain <= 0:
+            return np.nan
+
+        days = lai_target / daily_lai_gain
+        return days
+
+    @classmethod
+    def render(cls):
+        st.subheader("Canopy Closure (Days to Close)")
+
+        st.markdown(
+            """
+            Rough estimate of **how many days** it takes for a crop to reach canopy closure
+            (LAI ≈ 3) based on:
+
+            - **Plant density** (plants per m²)  
+            - **Average air temperature** (°C)  
+            - **Average PPFD during the light period** (µmol·m⁻²·s⁻¹)  
+            - **Photoperiod** (hours of light per day)  
+
+            Tuned mainly for **leafy crops** in the ~15–30 plants/m² range.
+            Treat the result as a **first-pass guide**, not a hard rule.
+            """
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            density = st.number_input(
+                "Plant density (plants/m²)",
+                min_value=1.0,
+                max_value=80.0,
+                value=25.0,
+                step=1.0,
+            )
+
+            ppfd = st.number_input(
+                "Average PPFD during photoperiod (µmol·m⁻²·s⁻¹)",
+                min_value=0.0,
+                max_value=3000.0,
+                value=220.0,
+                step=10.0,
+            )
+
+        with col2:
+            temp_c = st.number_input(
+                "Average air temperature (°C)",
+                min_value=0.0,
+                max_value=35.0,
+                value=20.0,
+                step=0.5,
+            )
+
+            photoperiod_h = st.number_input(
+                "Photoperiod (hours of light per day)",
+                min_value=0.0,
+                max_value=24.0,
+                value=16.0,
+                step=0.5,
+            )
+
+        days = cls.compute_days_to_closure(
+            density_plants_m2=density,
+            temp_c=temp_c,
+            ppfd=ppfd,
+            photoperiod_h=photoperiod_h,
+        )
+
+        if np.isnan(days):
+            st.info("Enter non-zero values for density, PPFD and photoperiod to see an estimate.")
+            return
+
+        st.markdown("### Result")
+        st.write(f"**Estimated days to canopy closure: {days:.1f} days**")
+
+        with st.expander("What this estimate assumes", expanded=False):
+            st.markdown(
+                f"""
+                - Target canopy: **LAI ≈ {cls.BASE_LAI_TARGET:.1f}**  
+                - Growth scales linearly with **daily DLI** and a simple temperature response  
+                - Tuned so that ~**25 plants/m²**, **15 mol·m⁻²·day⁻¹**, **20°C** ⇒ ~**18 days** to closure  
+
+                Best used as a **relative tool**:
+                - Compare scenarios (different densities / light levels / temps)  
+                - Sense-check whether a given climate is "slow", "normal", or "fast" for closure  
+                """
+            )
+
+
 class UnitConverterCalculator:
     """
     Generic unit converter for common greenhouse / agronomy-relevant quantities:
@@ -434,4 +587,3 @@ class UnitConverterCalculator:
         if result is not None:
             st.markdown("### Result")
             st.write(f"**{value} {from_unit} = {result:.4g} {to_unit}**")
-
