@@ -29,7 +29,6 @@ class LeafMeasurement:
 def _detect_grid_squares(image_bgr: np.ndarray) -> Tuple[Optional[float], List[Tuple[int, int, int, int]]]:
     """
     Detect square-ish contours and estimate pixel area for a 1 cm² grid square.
-    (Implementation remains the same)
     """
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -98,7 +97,8 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         api_key = st.secrets["roboflow"]["api_key"]
 
     if not api_key:
-        return None, False  # Key not found, attempt was NOT made
+        # Key not found: return None result and False for attempted
+        return None, False
 
     try:
         # Initialize client with the found key
@@ -107,7 +107,8 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
             api_key=api_key,
         )
     except Exception:
-        return None, True # Initialization failed, attempt WAS made
+        # Initialization failed: return None result and True for attempted
+        return None, True
 
     # Write bytes to a temporary file
     tmp_path = "tmp_phenotype_image.jpg"
@@ -115,14 +116,15 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
         with open(tmp_path, "wb") as f:
             f.write(image_bytes)
 
+        # Call the Roboflow workflow
         result = client.run_workflow(
             workspace_name="rootweiler",
             workflow_id="leafy",
             images={"image": tmp_path},
         )
     except Exception as e:
-        # st.exception(e) # Optional: uncomment for deep debugging
-        return None, True # Workflow call failed, attempt WAS made
+        # Workflow call failed: return None result and True for attempted
+        return None, True
     finally:
         if os.path.exists(tmp_path):
             try:
@@ -147,9 +149,11 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
 
     preds = output2.get("predictions")
     if not isinstance(preds, list) or len(preds) == 0:
+        # This is where 'returned no predictions' is caught
         return None, True
 
-    return {"predictions": preds}, True # Success
+    # Success
+    return {"predictions": preds}, True
 
 
 def _mask_from_roboflow_predictions(
@@ -157,7 +161,6 @@ def _mask_from_roboflow_predictions(
 ) -> np.ndarray:
     """
     Build a binary mask from Roboflow instance segmentation polygons.
-    (Implementation remains the same)
     """
     h, w, _ = image_shape
     mask = np.zeros((h, w), dtype=np.uint8)
@@ -197,7 +200,6 @@ def _color_based_mask(image_bgr: np.ndarray) -> np.ndarray:
 def _measure_leaves(mask: np.ndarray, pixels_per_cm2: float) -> List[LeafMeasurement]:
     """
     Use connected components on the binary mask to measure each leaf.
-    (Implementation remains the same)
     """
     if pixels_per_cm2 <= 0:
         raise ValueError("pixels_per_cm2 must be positive")
@@ -248,8 +250,6 @@ class PhenotypingUI:
             Upload a **phenotyping photo** taken on the 1&nbsp;cm grid board.
             """
         )
-        
-        # Adding an image tag for instructional value
         st.markdown("")
 
 
@@ -265,7 +265,7 @@ class PhenotypingUI:
         image_bytes = uploaded.read()
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         img_rgb = np.array(pil_img)
-        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2RGB)
 
         # --- Grid calibration ---
         with st.spinner("Step 1/3: Calibrating grid for scale..."):
