@@ -125,15 +125,14 @@ def run_roboflow_segmentation(
     Call a Roboflow workflow to segment leaves.
 
     - Uses a temporary file path for the image (Roboflow example style).
-    - Expects the workflow to eventually output a list of detections with
-      polygons or bounding boxes.
+    - Expects the workflow to output detections with polygons or bounding boxes.
     - Returns a binary mask (255 where leaf, 0 elsewhere) on success, or None if
       anything doesn't line up.
     """
 
     api_key = st.secrets.get("ROBOFLOW_API_KEY", None)
     if not api_key:
-        st.info("No Roboflow API key found in secrets. Using fallback segmentation.")
+        st.info("No Roboflow API key found in secrets. Using color-based segmentation.")
         return None
 
     client = InferenceHTTPClient(
@@ -147,6 +146,8 @@ def run_roboflow_segmentation(
         cv2.imwrite(temp_path, image_bgr)
 
     try:
+        # ⚠️ IMPORTANT: keys in `images={...}` must match the name of the image input
+        # node in your Roboflow workflow. Docs example uses "image".
         result = client.run_workflow(
             workspace_name=workspace_name,
             workflow_id=workflow_id,
@@ -155,17 +156,22 @@ def run_roboflow_segmentation(
     except Exception as e:
         st.warning(
             "Roboflow workflow failed or is not configured correctly. "
-            "Falling back to simple HSV segmentation.\n\n"
-            f"Details: {e}"
+            "Falling back to color-based segmentation."
         )
-        os.remove(temp_path)
+        # Show full traceback in the app so we can see what's wrong
+        st.exception(e)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         return None
     finally:
-        # Clean up temp file
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-    # The exact schema can vary by workflow; try to locate "predictions".
+    # Show raw result (once) to understand structure
+    with st.expander("Debug: raw Roboflow result", expanded=False):
+        st.json(result)
+
+    # Try to find predictions
     predictions = None
 
     if isinstance(result, dict):
@@ -175,15 +181,16 @@ def run_roboflow_segmentation(
             predictions = result["image"]["predictions"]
         elif "steps" in result and isinstance(result["steps"], dict):
             # Try to find first step with "predictions"
-            for step in result["steps"].values():
+            for step_name, step in result["steps"].items():
                 if isinstance(step, dict) and "predictions" in step:
+                    st.caption(f"Using predictions from workflow step: **{step_name}**")
                     predictions = step["predictions"]
                     break
 
     if not predictions:
         st.warning(
-            "Roboflow workflow did not return predictions in a recognized format. "
-            "Falling back to simple HSV segmentation."
+            "Roboflow workflow ran but no 'predictions' field was found in the response. "
+            "Showing raw result above – we may need to adjust how we parse it."
         )
         return None
 
@@ -193,12 +200,11 @@ def run_roboflow_segmentation(
     # We will handle both bounding boxes and polygons if available
     for det in predictions:
         # Example keys might be: {'x','y','width','height'} or 'points'
-        if "points" in det:  # polygon
+        if isinstance(det, dict) and "points" in det:  # polygon
             pts = np.array(det["points"], dtype=np.int32)
             pts = pts.reshape((-1, 1, 2))
             cv2.fillPoly(mask, [pts], 255)
-        elif {"x", "y", "width", "height"} <= det.keys():
-            # bounding box center + size
+        elif isinstance(det, dict) and {"x", "y", "width", "height"} <= det.keys():
             cx = det["x"]
             cy = det["y"]
             bw = det["width"]
