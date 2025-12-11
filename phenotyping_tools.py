@@ -3,6 +3,7 @@
 import base64
 import io
 import os
+import tempfile  # <-- needed for mkstemp
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 
@@ -12,6 +13,7 @@ import pandas as pd
 import streamlit as st
 from inference_sdk import InferenceHTTPClient
 from PIL import Image
+
 
 # ---------------------------------------------------------------------
 # Types
@@ -103,26 +105,43 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, object]]:
 
     try:
         client = InferenceHTTPClient(
-            api_url="https://serverless.roboflow.com",
+            api_url="https://serverless.roboflow.com",  # or "https://detect.roboflow.com"
             api_key=api_key,
         )
     except Exception as e:
         st.info(f"Could not initialize Roboflow client ({type(e).__name__}). Falling back to color segmentation.")
         return None
 
-    # Write bytes to a temp file – the SDK is happiest with a path
+    # Write bytes to a temp file – older SDKs are happy with a path here
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
     os.close(tmp_fd)
     with open(tmp_path, "wb") as f:
         f.write(image_bytes)
 
     try:
-        result = client.run_workflow(
-            workspace_name="rootweiler",   # <-- your workspace
-            workflow_id="leafy",           # <-- your workflow id
-            images={"image": tmp_path},
-            use_cache=True,
-        )
+        # Newer inference-sdk: run_workflow(...)
+        try:
+            result = client.run_workflow(
+                workspace_name="rootweiler",   # <-- your workspace
+                workflow_id="leafy",           # <-- your workflow id
+                images={"image": tmp_path},
+                use_cache=True,
+            )
+        except AttributeError:
+            # Older inference-sdk: fall back to infer_from_workflow(...)
+            try:
+                result = client.infer_from_workflow(
+                    workspace_name="rootweiler",
+                    workflow_id="leafy",
+                    images={"image": tmp_path},
+                    use_cache=True,
+                )
+            except Exception as e2:
+                st.info(
+                    f"Roboflow workflow call failed on legacy fallback "
+                    f"({type(e2).__name__}: {e2}). Using color-based segmentation."
+                )
+                return None
     except Exception as e:
         st.info(
             f"Roboflow workflow call failed ({type(e).__name__}: {e}). "
@@ -152,7 +171,7 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Optional[Dict[str, object]]:
         # According to your JSON, this is already $steps.model.predictions
         preds = item["output2"]
 
-    # Also support "model_predictions" if you later rename your output to match docs
+    # Also support "model_predictions" if you later rename your output
     if preds is None and "model_predictions" in item:
         mp = item["model_predictions"]
         if isinstance(mp, dict):
@@ -319,7 +338,6 @@ class PhenotypingUI:
         if pixels_per_cm2 is None:
             st.error(
                 "Could not detect enough 1 cm squares on the board. "
-                "Check that the grid is in view and in focus."
             )
             return
 
@@ -338,14 +356,13 @@ class PhenotypingUI:
 
         # --- Segmentation: Roboflow first, fallback to color ---
         rf_result = _run_roboflow_workflow(image_bytes)
-        
+
         if rf_result is not None:
             mask = _mask_from_roboflow_predictions(img_rgb.shape, rf_result["predictions"])
             st.caption("Leaf segmentation: Roboflow instance segmentation workflow (`leafy`).")
         else:
             mask = _color_based_mask(img_bgr)
             st.caption("Leaf segmentation: simple color-based fallback.")
-
 
         # Ensure binary mask
         mask_bin = np.where(mask > 0, 255, 0).astype(np.uint8)
