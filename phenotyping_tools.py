@@ -1,83 +1,126 @@
 # phenotyping_tools.py
 #
-# Minimal phenotyping test:
-# - Upload an image
+# End-to-end phenotyping:
+# - Upload phenotyping image on 1 cm grid board
 # - Call Roboflow "leafy" workflow via HTTP
-# - Show the raw JSON response
+# - Build leaf mask from polygon predictions (if available)
+# - Detect grid squares and calibrate pixels -> cm
+# - Measure leaf area, height, area/height
+# - Display images + table in Streamlit
 #
-# Keeps the same PhenotypingUI class and render() signature
-# so app.py does not need to change.
+# Keeps the same PhenotypingUI.render() so app.py does not need to change.
 
 import base64
 import io
 import os
-from typing import Optional, Dict, Any
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Dict, Any
 
+import cv2
+import numpy as np
+import pandas as pd
 import requests
 import streamlit as st
 from PIL import Image
 
 
-class PhenotypingUI:
+# ---------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------
+@dataclass
+class LeafMeasurement:
+    id: int
+    area_cm2: float
+    height_cm: float
+    area_height_ratio: float
+
+
+# ---------------------------------------------------------------------
+# Grid calibration – detect 1 cm² squares
+# ---------------------------------------------------------------------
+def _detect_grid_squares(
+    image_bgr: np.ndarray,
+) -> Tuple[Optional[float], List[Tuple[int, int, int, int]]]:
     """
-    Minimal phenotyping UI to prove that the Roboflow workflow call works
-    inside your Streamlit app.
+    Detect square-ish contours and estimate pixel area for a 1 cm² grid square.
 
-    Flow:
-    - User uploads an image
-    - We display the image
-    - We call the Roboflow Workflow API for 'rootweiler/leafy'
-    - We print the JSON result
-
-    Once this is solid, you can wire the JSON into your measurement logic.
+    Returns:
+        pixels_per_cm2 (float | None), list of chosen square bounding boxes (for overlay).
     """
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-    @classmethod
-    def _get_api_key(cls) -> Optional[str]:
-        """
-        Get Roboflow API key from Streamlit secrets.
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-        Supports either:
-        - ROBOFLOW_API_KEY = "..."
-        or
-        - [roboflow]
-          api_key = "..."
-        in .streamlit/secrets.toml
-        """
-        api_key = None
+    squares: List[Tuple[int, int, int, int]] = []
 
-        if "ROBOFLOW_API_KEY" in st.secrets:
-            api_key = st.secrets["ROBOFLOW_API_KEY"]
-        elif "roboflow" in st.secrets and "api_key" in st.secrets["roboflow"]:
-            api_key = st.secrets["roboflow"]["api_key"]
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
 
-        if not api_key:
-            st.error(
-                "Roboflow API key not found.\n\n"
-                "Please add one of the following to `.streamlit/secrets.toml`:\n\n"
-                'ROBOFLOW_API_KEY = "your_key_here"\n\n'
-                "or\n\n"
-                "[roboflow]\n"
-                'api_key = "your_key_here"\n'
-            )
-            return None
+        # roughly square and not tiny
+        if abs(w - h) < 10 and w * h > 1000:
+            squares.append((x, y, w, h))
 
-        return api_key
+    if len(squares) < 20:
+        return None, []
 
-    @classmethod
-    def _call_workflow_http(
-        cls, api_key: str, workspace_name: str, workflow_id: str, image_bytes: bytes
-    ) -> Dict[str, Any]:
-        """
-        Call Roboflow workflow via the HTTP REST API directly.
+    # Use median area to filter consistent squares
+    areas = [w * h for (_, _, w, h) in squares]
+    median_area = float(np.median(areas))
 
-        Endpoint (from docs):
+    # Keep squares whose area is closest to median
+    squares_sorted = sorted(
+        squares, key=lambda s: abs((s[2] * s[3]) - median_area)
+    )
+    chosen = squares_sorted[:20]
+
+    avg_area = float(np.mean([w * h for (_, _, w, h) in chosen]))
+    pixels_per_cm2 = avg_area
+
+    return pixels_per_cm2, chosen
+
+
+def _overlay_grid_boxes(
+    image_bgr: np.ndarray, boxes: List[Tuple[int, int, int, int]]
+) -> np.ndarray:
+    """Return a copy of the image with green rectangles drawn on detected grid squares."""
+    out = image_bgr.copy()
+    for (x, y, w, h) in boxes:
+        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    return out
+
+
+# ---------------------------------------------------------------------
+# Roboflow workflow – HTTP call
+# ---------------------------------------------------------------------
+def _get_api_key() -> Optional[str]:
+    """
+    Get Roboflow API key from Streamlit secrets.
+
+    Supports either:
+    - ROBOFLOW_API_KEY = "..."
+    or
+    - [roboflow]
+      api_key = "..."
+    in .streamlit/secrets.toml
+    """
+    if "ROBOFLOW_API_KEY" in st.secrets:
+        return st.secrets["ROBOFLOW_API_KEY"]
+    if "roboflow" in st.secrets and "api_key" in st.secrets["roboflow"]:
+        return st.secrets["roboflow"]["api_key"]
+    return None
+
+
+def _call_workflow_http(
+    api_key: str, workspace_name: str, workflow_id: str, image_bytes: bytes
+) -> Dict[str, Any]:
+    """
+    Call Roboflow workflow via the HTTP REST API directly.
+
+    Endpoint:
         POST https://detect.roboflow.com/infer/workflows/<workspace>/<workflow-id>
 
-        Body:
+    Body:
         {
           "api_key": "...",
           "inputs": {
@@ -87,71 +130,182 @@ class PhenotypingUI:
             }
           }
         }
-        """
-        # Encode image as base64
-        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    """
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        url = f"https://detect.roboflow.com/infer/workflows/{workspace_name}/{workflow_id}"
+    url = f"https://detect.roboflow.com/infer/workflows/{workspace_name}/{workflow_id}"
 
-        payload = {
-            "api_key": api_key,
-            "inputs": {
-                "image": {
-                    "type": "base64",
-                    "value": image_b64,
-                }
-            },
-        }
+    payload = {
+        "api_key": api_key,
+        "inputs": {
+            "image": {
+                "type": "base64",
+                "value": image_b64,
+            }
+        },
+    }
 
-        # You can add more inputs here later if your workflow expects them
-
-        resp = requests.post(url, json=payload, timeout=60)
+    resp = requests.post(url, json=payload, timeout=60)
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        msg = f"HTTP {resp.status_code}"
         try:
-            resp.raise_for_status()
-        except requests.HTTPError as e:
-            # Try to show any error message from Roboflow in addition to status code
-            msg = f"HTTP {resp.status_code}"
-            try:
-                j = resp.json()
-                # Roboflow errors often come with 'error' or 'message' fields
-                err_text = j.get("error") or j.get("message")
-                if err_text:
-                    msg += f" – {err_text}"
-            except Exception:
-                pass
-            raise RuntimeError(f"Roboflow HTTP error: {msg}") from e
+            j = resp.json()
+            err_text = j.get("error") or j.get("message")
+            if err_text:
+                msg += f" – {err_text}"
+        except Exception:
+            pass
+        raise RuntimeError(f"Roboflow HTTP error: {msg}") from e
 
-        try:
-            result = resp.json()
-        except Exception as e:
-            raise RuntimeError(f"Could not decode JSON from Roboflow: {e}") from e
+    try:
+        result = resp.json()
+    except Exception as e:
+        raise RuntimeError(f"Could not decode JSON from Roboflow: {e}") from e
 
-        return result
+    return result
 
-    # ------------------------------------------------------------------
-    # Public UI
-    # ------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
+# Extract polygon predictions from workflow JSON
+# ---------------------------------------------------------------------
+def _find_polygon_predictions(obj: Any) -> Optional[List[dict]]:
+    """
+    Recursively search the workflow result for a list of prediction dicts
+    that contain "points" (Roboflow's polygon format).
+
+    This makes us robust to different output naming (output1/output2/etc).
+    """
+
+    # If it's already a list, check if it looks like predictions
+    if isinstance(obj, list):
+        if obj and all(isinstance(item, dict) and "points" in item for item in obj):
+            return obj
+        for item in obj:
+            res = _find_polygon_predictions(item)
+            if res is not None:
+                return res
+
+    # If it's a dict, recurse on values
+    if isinstance(obj, dict):
+        for v in obj.values():
+            res = _find_polygon_predictions(v)
+            if res is not None:
+                return res
+
+    return None
+
+
+def _mask_from_roboflow_predictions(
+    image_shape: Tuple[int, int, int], predictions: List[dict]
+) -> np.ndarray:
+    """
+    Build a binary mask from Roboflow instance segmentation polygons.
+    All leaves are set to 255 in a single-channel mask.
+    """
+    h, w, _ = image_shape
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    for pred in predictions:
+        pts = pred.get("points")
+        if not pts or not isinstance(pts, list):
+            continue
+        poly = np.array(
+            [[p["x"], p["y"]] for p in pts if "x" in p and "y" in p],
+            dtype=np.int32,
+        )
+        if poly.shape[0] < 3:
+            continue
+        cv2.fillPoly(mask, [poly], 255)
+
+    return mask
+
+
+# ---------------------------------------------------------------------
+# Fallback color-based segmentation (simple HSV threshold)
+# ---------------------------------------------------------------------
+def _color_based_mask(image_bgr: np.ndarray) -> np.ndarray:
+    """Simple green-ish segmentation as a fallback when Roboflow is not available."""
+    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
+    lower_green = np.array([30, 40, 40])
+    upper_green = np.array([90, 255, 255])
+    mask = cv2.inRange(hsv, lower_green, upper_green)
+
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+
+    return mask
+
+
+# ---------------------------------------------------------------------
+# Leaf measurement helpers
+# ---------------------------------------------------------------------
+def _measure_leaves(mask: np.ndarray, pixels_per_cm2: float) -> List[LeafMeasurement]:
+    """
+    Use connected components on the binary mask to measure each leaf.
+    """
+    if pixels_per_cm2 <= 0:
+        raise ValueError("pixels_per_cm2 must be positive")
+
+    pixels_per_cm = float(np.sqrt(pixels_per_cm2))
+
+    num_labels, labels = cv2.connectedComponents(mask)
+    measurements: List[LeafMeasurement] = []
+
+    for label_id in range(1, num_labels):
+        component = labels == label_id
+        area_px = int(np.count_nonzero(component))
+        if area_px < 500:  # ignore tiny specks
+            continue
+
+        ys, xs = np.where(component)
+        if len(ys) == 0:
+            continue
+
+        height_px = ys.max() - ys.min() + 1
+
+        area_cm2 = area_px / pixels_per_cm2
+        height_cm = height_px / pixels_per_cm
+        ratio = area_cm2 / height_cm if height_cm > 0 else 0.0
+
+        measurements.append(
+            LeafMeasurement(
+                id=len(measurements) + 1,
+                area_cm2=area_cm2,
+                height_cm=height_cm,
+                area_height_ratio=ratio,
+            )
+        )
+
+    return measurements
+
+
+# ---------------------------------------------------------------------
+# Streamlit UI
+# ---------------------------------------------------------------------
+class PhenotypingUI:
+    """Leaf phenotyping tool using Roboflow workflow + grid calibration."""
+
     @classmethod
     def render(cls):
-        st.subheader("Leaf phenotyping (Roboflow workflow test)")
+        st.subheader("Leaf phenotyping")
 
         st.markdown(
             """
-            This is a **minimal test** of your Roboflow workflow integration.
+            Upload a **phenotyping photo** taken on the 1&nbsp;cm grid board.  
+            Rootweiler will:
 
-            It will:
-
-            1. Let you upload a phenotyping image  
-            2. Send it to the Roboflow **leafy** workflow via HTTP  
-            3. Show the raw JSON response from Roboflow  
-
-            Once this works, you can plug the outputs into your
-            grid calibration, masks, and leaf measurements.
+            - Detect the grid and convert pixels to **cm²**
+            - Segment each leaf (via your Roboflow **leafy** workflow if available)
+            - Measure leaf **area**, **height**, and **area : height** ratio
+            - Compute average leaf size and variability
             """
         )
 
         uploaded = st.file_uploader(
-            "Upload a leaf / phenotyping image",
+            "Upload phenotyping image",
             type=["jpg", "jpeg", "png"],
         )
 
@@ -159,42 +313,140 @@ class PhenotypingUI:
             st.info("Upload an image to begin.")
             return
 
-        # Read the uploaded bytes
         image_bytes = uploaded.read()
+        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img_rgb = np.array(pil_img)
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-        # Show the uploaded image
-        try:
-            pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        except Exception as e:
-            st.error(f"Could not open image: {e}")
+        # --- Grid calibration ---
+        pixels_per_cm2, grid_boxes = _detect_grid_squares(img_bgr)
+        if pixels_per_cm2 is None:
+            st.error(
+                "Could not detect enough 1 cm squares on the board. "
+                "Check that the grid is in view and in focus."
+            )
             return
 
-        st.image(pil_img, caption="Uploaded image", use_column_width=True)
+        pixels_per_cm = float(np.sqrt(pixels_per_cm2))
 
-        # Get API key
-        api_key = cls._get_api_key()
-        if api_key is None:
-            return
+        st.markdown(
+            f"**Grid calibration:** ~{pixels_per_cm:.1f} pixels per cm "
+            f"→ ~{pixels_per_cm2:.0f} pixels per cm²"
+        )
 
-        # Workspace and workflow ID: adjust if your names differ
-        workspace_name = "rootweiler"  # from your description
-        workflow_id = "leafy"          # from your description
+        with st.expander("Show grid squares used for calibration", expanded=False):
+            overlay = _overlay_grid_boxes(img_bgr, grid_boxes)
+            overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+            st.image(
+                overlay_rgb,
+                caption="Detected 1 cm² grid squares",
+                use_container_width=True,
+            )
 
-        st.caption(f"Workflow: `{workspace_name}/{workflow_id}`")
+        # --- Segmentation: Roboflow first, fallback to color ---
+        api_key = _get_api_key()
+        mask_from_rf: Optional[np.ndarray] = None
+        rf_result: Optional[Dict[str, Any]] = None
 
-        if st.button("Run Roboflow 'leafy' workflow"):
-            with st.spinner("Calling Roboflow workflow..."):
-                try:
-                    result = cls._call_workflow_http(
-                        api_key=api_key,
-                        workspace_name=workspace_name,
-                        workflow_id=workflow_id,
-                        image_bytes=image_bytes,
+        if api_key:
+            try:
+                rf_result = _call_workflow_http(
+                    api_key=api_key,
+                    workspace_name="rootweiler",
+                    workflow_id="leafy",
+                    image_bytes=image_bytes,
+                )
+                preds = _find_polygon_predictions(rf_result)
+                if preds:
+                    mask_from_rf = _mask_from_roboflow_predictions(
+                        img_rgb.shape, preds
                     )
-                except Exception as e:
-                    st.error(f"Roboflow workflow call failed: {e}")
-                    return
+                    st.caption(
+                        "Leaf segmentation: Roboflow **leafy** workflow "
+                        "(polygon instance segmentation)."
+                    )
+                else:
+                    st.info(
+                        "Roboflow call succeeded but no polygon predictions were "
+                        "found in the output. Falling back to color-based mask."
+                    )
+            except Exception as e:
+                st.info(
+                    f"Roboflow workflow call failed ({type(e).__name__}: {e}). "
+                    "Using color-based segmentation instead."
+                )
 
-            st.success("Successfully received a response from Roboflow.")
-            st.markdown("### Raw JSON result")
-            st.json(result)
+        if mask_from_rf is not None:
+            mask = mask_from_rf
+        else:
+            mask = _color_based_mask(img_bgr)
+            st.caption("Leaf segmentation: simple color-based fallback.")
+
+        mask_bin = np.where(mask > 0, 255, 0).astype(np.uint8)
+
+        # --- Visuals: original, mask ---
+        st.markdown("### Segmentation overview")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.image(img_rgb, caption="Original image", use_column_width=True)
+        with c2:
+            st.image(mask_bin, caption="Binary leaf mask", use_column_width=True)
+
+        # Optional: debug view of raw JSON from Roboflow
+        if rf_result is not None:
+            with st.expander("Show raw Roboflow JSON", expanded=False):
+                st.json(rf_result)
+
+        # --- Measurements ---
+        try:
+            leaf_measurements = _measure_leaves(mask_bin, pixels_per_cm2)
+        except ValueError as e:
+            st.error(str(e))
+            return
+
+        if not leaf_measurements:
+            st.error(
+                "No leaves detected in the mask. "
+                "Check the image / segmentation settings."
+            )
+            return
+
+        # --- Table + summary ---
+        st.markdown("### Leaf measurements")
+
+        df = pd.DataFrame(
+            [
+                {
+                    "Leaf": m.id,
+                    "Area (cm²)": round(m.area_cm2, 2),
+                    "Height (cm)": round(m.height_cm, 2),
+                    "Area / Height": round(m.area_height_ratio, 2),
+                }
+                for m in leaf_measurements
+            ]
+        )
+
+        st.dataframe(df, use_container_width=True)
+
+        # Summary stats
+        st.markdown("#### Summary")
+        st.write(
+            f"- Number of leaves: **{len(leaf_measurements)}**\n"
+            f"- Mean area: **{df['Area (cm²)'].mean():.2f} cm²**\n"
+            f"- Mean height: **{df['Height (cm)'].mean():.2f} cm**\n"
+        )
+
+        # Download table
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Leaf measurements")
+
+        st.download_button(
+            label="Download table (Excel)",
+            data=buf.getvalue(),
+            file_name="leaf_measurements.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+        )
