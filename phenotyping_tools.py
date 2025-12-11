@@ -76,7 +76,7 @@ def _overlay_grid_boxes(image_bgr: np.ndarray, boxes: List[Tuple[int, int, int, 
     return out
 
 # ---------------------------------------------------------------------
-# Roboflow SDK Integration (Updated to match your snippet)
+# Roboflow SDK Integration
 # ---------------------------------------------------------------------
 @st.cache_data(show_spinner="Running Roboflow segmentation workflow...")
 def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, object]], bool]:
@@ -95,13 +95,11 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
 
     # 2. Setup Client
     try:
-        # We explicitly use the URL from your snippet
         client = InferenceHTTPClient(
             api_url="https://serverless.roboflow.com",
             api_key=api_key
         )
     except Exception as e:
-        # This usually only fails if libraries are missing
         st.error(f"Failed to initialize SDK client: {e}")
         return None, True
 
@@ -110,9 +108,10 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
     with open(tmp_path, "wb") as f:
         f.write(image_bytes)
 
-    # 4. Run Workflow (Exact snippet logic)
+    # 4. Run Workflow
     result = None
     try:
+        # NOTE: Removed 'use_cache=True' as it caused errors with your version of the SDK
         result = client.run_workflow(
             workspace_name="rootweiler",
             workflow_id="leafy",
@@ -121,14 +120,12 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
             },
             parameters={
                 "output_message": "Your model is being initialized, try again in a few seconds."
-            },
-            use_cache=True
+            }
         )
     except Exception as e:
-        # Check specifically for Auth errors
         error_str = str(e)
         if "401" in error_str or "403" in error_str or "Unauthorized" in error_str:
-             st.error("❌ Roboflow Authentication Failed. Please check the API Key in secrets.toml for typos or spaces.")
+             st.error("❌ Roboflow Authentication Failed. Please check the API Key in secrets.toml.")
         else:
              st.error(f"❌ Roboflow Workflow Error: {e}")
         return None, True
