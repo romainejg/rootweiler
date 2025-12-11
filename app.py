@@ -342,7 +342,7 @@ def render_calculators():
             "Vapor Pressure Deficit (VPD)",
             "Plants per m²",
             "Unit Converter",
-            "Canopy Closure",
+            "Canopy Closure"
         ]
     )
 
@@ -702,6 +702,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
