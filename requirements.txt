@@ -12,5 +12,6 @@ seaborn
 plotly
 inference-sdk
 scikit-image
+cv2
 
 
