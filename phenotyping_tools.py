@@ -142,17 +142,15 @@ def _run_roboflow_workflow(image_bytes: bytes) -> Tuple[Optional[Dict[str, objec
     if not isinstance(obj, dict):
         return None, True
 
-    # Check for "output2" and "predictions"
-    output2 = obj.get("output2")
-    if not isinstance(output2, dict):
-        return None, True
-
-    preds = output2.get("predictions")
+    # CORRECTED LOGIC: The predictions are the value of "output2"
+    preds = obj.get("output2") 
+    
+    # Validate that it is a list and has content
     if not isinstance(preds, list) or len(preds) == 0:
-        # This is where 'returned no predictions' is caught
+        # If the list is empty or not a list, it failed to segment
         return None, True
 
-    # Success
+    # Success: return the result in the format expected by the caller
     return {"predictions": preds}, True
 
 
@@ -265,7 +263,7 @@ class PhenotypingUI:
         image_bytes = uploaded.read()
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         img_rgb = np.array(pil_img)
-        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2RGB)
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
         # --- Grid calibration ---
         with st.spinner("Step 1/3: Calibrating grid for scale..."):
