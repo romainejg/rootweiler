@@ -1,43 +1,44 @@
 # phenotyping_tools.py
 #
-# Bare-bones test version of the phenotyping tools.
-# Goal:
+# Minimal phenotyping test:
 # - Upload an image
-# - Send it to the Roboflow "leafy" workflow
-# - Display the raw JSON response in Streamlit
+# - Call Roboflow "leafy" workflow via HTTP
+# - Show the raw JSON response
 #
-# This keeps the PhenotypingUI class and .render() method
-# so that app.py does not need to change.
+# Keeps the same PhenotypingUI class and render() signature
+# so app.py does not need to change.
 
+import base64
 import io
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 
+import requests
 import streamlit as st
 from PIL import Image
-from inference_sdk import InferenceHTTPClient
 
 
 class PhenotypingUI:
     """
-    Minimal phenotyping UI to prove that Roboflow integration works.
+    Minimal phenotyping UI to prove that the Roboflow workflow call works
+    inside your Streamlit app.
 
-    Steps:
+    Flow:
     - User uploads an image
     - We display the image
-    - We send it to the Roboflow "leafy" workflow
-    - We show the raw JSON response
+    - We call the Roboflow Workflow API for 'rootweiler/leafy'
+    - We print the JSON result
 
-    Once this works, you can plug in grid detection and measurements again.
+    Once this is solid, you can wire the JSON into your measurement logic.
     """
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
     @classmethod
-    def _get_client(cls) -> Optional[InferenceHTTPClient]:
+    def _get_api_key(cls) -> Optional[str]:
         """
-        Create a Roboflow InferenceHTTPClient from Streamlit secrets.
+        Get Roboflow API key from Streamlit secrets.
 
         Supports either:
         - ROBOFLOW_API_KEY = "..."
@@ -48,11 +49,8 @@ class PhenotypingUI:
         """
         api_key = None
 
-        # Option 1: flat key
         if "ROBOFLOW_API_KEY" in st.secrets:
             api_key = st.secrets["ROBOFLOW_API_KEY"]
-
-        # Option 2: nested key
         elif "roboflow" in st.secrets and "api_key" in st.secrets["roboflow"]:
             api_key = st.secrets["roboflow"]["api_key"]
 
@@ -67,83 +65,88 @@ class PhenotypingUI:
             )
             return None
 
-        try:
-            client = InferenceHTTPClient(
-                api_url="https://serverless.roboflow.com",
-                api_key=api_key,
-            )
-            return client
-        except Exception as e:
-            st.error(f"Could not initialize Roboflow client: {e}")
-            return None
+        return api_key
 
     @classmethod
-    def _run_leafy_workflow(cls, client: InferenceHTTPClient, image_path: str):
+    def _call_workflow_http(
+        cls, api_key: str, workspace_name: str, workflow_id: str, image_bytes: bytes
+    ) -> Dict[str, Any]:
         """
-        Call the 'leafy' workflow on the given image path.
+        Call Roboflow workflow via the HTTP REST API directly.
 
-        Different versions of `inference-sdk` have slightly different
-        `run_workflow` signatures. The docs you pasted show:
+        Endpoint (from docs):
+        POST https://detect.roboflow.com/infer/workflows/<workspace>/<workflow-id>
 
-            run_workflow(..., parameters=..., use_cache=True)
-
-        But your installed version raises:
-            unexpected keyword argument 'use_cache'
-
-        So we:
-        1. Try the "new" signature with parameters + use_cache.
-        2. If we get a TypeError, fall back to a minimal call.
+        Body:
+        {
+          "api_key": "...",
+          "inputs": {
+            "image": {
+              "type": "base64",
+              "value": "<base64-encoded-image>"
+            }
+          }
+        }
         """
-        result = None
+        # Encode image as base64
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        url = f"https://detect.roboflow.com/infer/workflows/{workspace_name}/{workflow_id}"
+
+        payload = {
+            "api_key": api_key,
+            "inputs": {
+                "image": {
+                    "type": "base64",
+                    "value": image_b64,
+                }
+            },
+        }
+
+        # You can add more inputs here later if your workflow expects them
+
+        resp = requests.post(url, json=payload, timeout=60)
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            # Try to show any error message from Roboflow in addition to status code
+            msg = f"HTTP {resp.status_code}"
+            try:
+                j = resp.json()
+                # Roboflow errors often come with 'error' or 'message' fields
+                err_text = j.get("error") or j.get("message")
+                if err_text:
+                    msg += f" – {err_text}"
+            except Exception:
+                pass
+            raise RuntimeError(f"Roboflow HTTP error: {msg}") from e
 
         try:
-            # First attempt: "new" style call from the docs
-            result = client.run_workflow(
-                workspace_name="rootweiler",
-                workflow_id="leafy",
-                images={"image": image_path},
-                parameters={
-                    "output_message": "Your model is being initialized, try again in a few seconds."
-                },
-                use_cache=True,
-            )
-            return result
-        except TypeError:
-            # This is what you saw:
-            #   InferenceHTTPClient.run_workflow() got an unexpected keyword argument 'use_cache'
-            # So we retry with the simplest version supported by older clients.
-            try:
-                result = client.run_workflow(
-                    workspace_name="rootweiler",
-                    workflow_id="leafy",
-                    images={"image": image_path},
-                )
-                return result
-            except Exception as e:
-                # Propagate as a normal error for the UI to show
-                raise e
+            result = resp.json()
         except Exception as e:
-            # Any other error bubble up
-            raise e
+            raise RuntimeError(f"Could not decode JSON from Roboflow: {e}") from e
+
+        return result
 
     # ------------------------------------------------------------------
     # Public UI
     # ------------------------------------------------------------------
     @classmethod
     def render(cls):
-        st.subheader("Leaf phenotyping (Roboflow test)")
+        st.subheader("Leaf phenotyping (Roboflow workflow test)")
 
         st.markdown(
             """
-            This is a **minimal test** of the Roboflow integration.
+            This is a **minimal test** of your Roboflow workflow integration.
 
             It will:
-            1. Let you upload a phenotyping image  
-            2. Send it to the Roboflow **leafy** workflow  
-            3. Show the raw JSON response in the app  
 
-            Once this works reliably, you can re-introduce grid
-            detection, measurements, and nicer visuals on top.
+            1. Let you upload a phenotyping image  
+            2. Send it to the Roboflow **leafy** workflow via HTTP  
+            3. Show the raw JSON response from Roboflow  
+
+            Once this works, you can plug the outputs into your
+            grid calibration, masks, and leaf measurements.
             """
         )
 
@@ -156,11 +159,10 @@ class PhenotypingUI:
             st.info("Upload an image to begin.")
             return
 
-        # --------------------------------------------------------------
-        # Read the uploaded file and display it
-        # --------------------------------------------------------------
+        # Read the uploaded bytes
         image_bytes = uploaded.read()
 
+        # Show the uploaded image
         try:
             pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         except Exception as e:
@@ -169,45 +171,30 @@ class PhenotypingUI:
 
         st.image(pil_img, caption="Uploaded image", use_column_width=True)
 
-        # --------------------------------------------------------------
-        # Create Roboflow client
-        # --------------------------------------------------------------
-        client = cls._get_client()
-        if client is None:
-            # Error already shown by _get_client
+        # Get API key
+        api_key = cls._get_api_key()
+        if api_key is None:
             return
 
-        # --------------------------------------------------------------
-        # Trigger workflow call
-        # --------------------------------------------------------------
+        # Workspace and workflow ID: adjust if your names differ
+        workspace_name = "rootweiler"  # from your description
+        workflow_id = "leafy"          # from your description
+
+        st.caption(f"Workflow: `{workspace_name}/{workflow_id}`")
+
         if st.button("Run Roboflow 'leafy' workflow"):
-            tmp_path = "tmp_phenotype_image.jpg"
-            result = None
-
-            # Write the image to a temporary file, because run_workflow
-            # expects a path in the "images" dict.
-            try:
-                with open(tmp_path, "wb") as f:
-                    f.write(image_bytes)
-
+            with st.spinner("Calling Roboflow workflow..."):
                 try:
-                    result = cls._run_leafy_workflow(client, tmp_path)
+                    result = cls._call_workflow_http(
+                        api_key=api_key,
+                        workspace_name=workspace_name,
+                        workflow_id=workflow_id,
+                        image_bytes=image_bytes,
+                    )
                 except Exception as e:
                     st.error(f"Roboflow workflow call failed: {e}")
-                    result = None
-            finally:
-                # Clean up temp file
-                if os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except OSError:
-                        pass
+                    return
 
-            # ----------------------------------------------------------
-            # Show the result
-            # ----------------------------------------------------------
-            if result is not None:
-                st.success("Successfully received a response from Roboflow:")
-                st.json(result)
-            else:
-                st.warning("No result returned from Roboflow.")
+            st.success("Successfully received a response from Roboflow.")
+            st.markdown("### Raw JSON result")
+            st.json(result)
