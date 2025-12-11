@@ -5,14 +5,13 @@
 # - Call Roboflow "leafy" workflow via HTTP
 # - Build leaf mask from polygon predictions (if available)
 # - Detect grid squares and calibrate pixels -> cm
-# - Measure leaf area, height, area/height
+# - Measure leaf size leaf area, height, width, height/width
 # - Display images + table in Streamlit
 #
 # Keeps the same PhenotypingUI.render() so app.py does not need to change.
 
 import base64
 import io
-import os
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -32,7 +31,8 @@ class LeafMeasurement:
     id: int
     area_cm2: float
     height_cm: float
-    area_height_ratio: float
+    width_cm: float
+    height_width_ratio: float
 
 
 # ---------------------------------------------------------------------
@@ -265,17 +265,20 @@ def _measure_leaves(mask: np.ndarray, pixels_per_cm2: float) -> List[LeafMeasure
             continue
 
         height_px = ys.max() - ys.min() + 1
+        width_px = xs.max() - xs.min() + 1
 
         area_cm2 = area_px / pixels_per_cm2
         height_cm = height_px / pixels_per_cm
-        ratio = area_cm2 / height_cm if height_cm > 0 else 0.0
+        width_cm = width_px / pixels_per_cm
+        ratio_hw = height_cm / width_cm if width_cm > 0 else 0.0
 
         measurements.append(
             LeafMeasurement(
                 id=len(measurements) + 1,
                 area_cm2=area_cm2,
                 height_cm=height_cm,
-                area_height_ratio=ratio,
+                width_cm=width_cm,
+                height_width_ratio=ratio_hw,
             )
         )
 
@@ -299,7 +302,7 @@ class PhenotypingUI:
 
             - Detect the grid and convert pixels to **cm²**
             - Segment each leaf (via your Roboflow **leafy** workflow if available)
-            - Measure leaf **area**, **height**, and **area : height** ratio
+            - Measure **Size Leaf Area**, **height**, **width**, and **height : width** ratio
             - Compute average leaf size and variability
             """
         )
@@ -346,7 +349,6 @@ class PhenotypingUI:
         # --- Segmentation: Roboflow first, fallback to color ---
         api_key = _get_api_key()
         mask_from_rf: Optional[np.ndarray] = None
-        rf_result: Optional[Dict[str, Any]] = None
 
         if api_key:
             try:
@@ -388,14 +390,9 @@ class PhenotypingUI:
         st.markdown("### Segmentation overview")
         c1, c2 = st.columns(2)
         with c1:
-            st.image(img_rgb, caption="Original image", use_column_width=True)
+            st.image(img_rgb, caption="Original image", use_container_width=True)
         with c2:
-            st.image(mask_bin, caption="Binary leaf mask", use_column_width=True)
-
-        # Optional: debug view of raw JSON from Roboflow
-        if rf_result is not None:
-            with st.expander("Show raw Roboflow JSON", expanded=False):
-                st.json(rf_result)
+            st.image(mask_bin, caption="Binary leaf mask", use_container_width=True)
 
         # --- Measurements ---
         try:
@@ -418,9 +415,10 @@ class PhenotypingUI:
             [
                 {
                     "Leaf": m.id,
-                    "Area (cm²)": round(m.area_cm2, 2),
+                    "Size Leaf Area (cm²)": round(m.area_cm2, 2),
                     "Height (cm)": round(m.height_cm, 2),
-                    "Area / Height": round(m.area_height_ratio, 2),
+                    "Width (cm)": round(m.width_cm, 2),
+                    "Height / Width": round(m.height_width_ratio, 2),
                 }
                 for m in leaf_measurements
             ]
@@ -432,8 +430,9 @@ class PhenotypingUI:
         st.markdown("#### Summary")
         st.write(
             f"- Number of leaves: **{len(leaf_measurements)}**\n"
-            f"- Mean area: **{df['Area (cm²)'].mean():.2f} cm²**\n"
+            f"- Mean Size Leaf Area: **{df['Size Leaf Area (cm²)'].mean():.2f} cm²**\n"
             f"- Mean height: **{df['Height (cm)'].mean():.2f} cm**\n"
+            f"- Mean width: **{df['Width (cm)'].mean():.2f} cm**\n"
         )
 
         # Download table
