@@ -15,6 +15,8 @@ import jpgExtract
 import boxing
 import debugger
 import climate_analyzer
+from imaging_tools import ImagingToolsUI
+
 
 # -----------------------
 # Helpers
@@ -701,13 +703,15 @@ def main():
     elif section == "Data & Graphs":
         render_data_graphs()
     elif section == "Imaging":
-        render_imaging()
+        ImagingToolsUI.render()
+
     else:
         render_home()
 
 
 if __name__ == "__main__":
     main()
+
 
 
 
