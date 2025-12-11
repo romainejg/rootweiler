@@ -5,6 +5,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 
 # ========= CONFIGURABLE THRESHOLDS (EDIT FOR YOUR CROP) ========= #
 
@@ -240,7 +243,9 @@ def detect_stress_segments(df_work: pd.DataFrame, ts: pd.Series | None, vpd_col:
 def classify_environment(vpd: dict, ppfd: dict, temp: dict, dli: dict):
     """
     Classify environment into gear (by DLI) and stability (by VPD + temp).
-    Also keep descriptive tags about specific circumstances.
+    Returns:
+      - env_label: e.g. "Mid gear, stable" / "High gear, unstable"
+      - tags: list of descriptive strings
     """
     tags = []
 
@@ -251,13 +256,13 @@ def classify_environment(vpd: dict, ppfd: dict, temp: dict, dli: dict):
         gear_tag = "DLI unknown (insufficient data)"
     elif dli_mean < 14:
         gear = "L"
-        gear_tag = f"Low gear DLI (<14): {dli_mean:.1f} mol/m²/d"
+        gear_tag = f"Low gear DLI (<14): {dli_mean:.1f} mol/m²/day"
     elif dli_mean <= 24:
         gear = "M"
-        gear_tag = f"Mid gear DLI (14–24): {dli_mean:.1f} mol/m²/d"
+        gear_tag = f"Mid gear DLI (14–24): {dli_mean:.1f} mol/m²/day"
     else:
         gear = "H"
-        gear_tag = f"High gear DLI (>25): {dli_mean:.1f} mol/m²/d"
+        gear_tag = f"High gear DLI (>24): {dli_mean:.1f} mol/m²/day"
     tags.append(gear_tag)
 
     # ---------- VPD behaviour tags ----------
@@ -266,7 +271,6 @@ def classify_environment(vpd: dict, ppfd: dict, temp: dict, dli: dict):
     vpd_cv = vpd.get("cv", np.nan)
     vpd_spikes = vpd.get("n_spikes", 0) if vpd.get("n_spikes", None) is not None else 0
 
-    # Approximate % time in target band
     if not pd.isna(pct_above) and not pd.isna(pct_below):
         pct_target = max(0.0, 100.0 - pct_above - pct_below)
     else:
@@ -284,7 +288,7 @@ def classify_environment(vpd: dict, ppfd: dict, temp: dict, dli: dict):
     elif not pd.isna(vpd_cv) and vpd_cv < 0.4:
         tags.append("VPD relatively stable")
 
-    # ---------- Light level tags (using PPFD) ----------
+    # ---------- Light level tags ----------
     ppfd_mean = ppfd.get("mean", np.nan)
     if not pd.isna(ppfd_mean):
         if ppfd_mean > 600:
@@ -331,60 +335,107 @@ def classify_environment(vpd: dict, ppfd: dict, temp: dict, dli: dict):
 
     stable = vpd_stable and temp_stable
 
-    # ---------- Overall type label (gear + stability) ----------
-    if gear == "L" and stable:
-        env_type = "Type L-S – Low gear, conservative & stable"
-    elif gear == "L" and not stable:
-        env_type = "Type L-U – Low gear, underpowered but noisy"
-    elif gear == "M" and stable:
-        env_type = "Type M-S – Mid gear, standard & stable"
-    elif gear == "M" and not stable:
-        env_type = "Type M-U – Mid gear, standard but chaotic"
-    elif gear == "H" and stable:
-        env_type = "Type H-S – High gear, racehorse under control"
-    elif gear == "H" and not stable:
-        env_type = "Type H-U – High gear, racehorse, unstable"
-    else:
-        env_type = "Unclassified environment (insufficient data)"
+    # ---------- Simple label ----------
+    gear_word = {
+        "L": "Low gear",
+        "M": "Mid gear",
+        "H": "High gear",
+        "?": "Unknown gear",
+    }.get(gear, "Unknown gear")
 
-    return env_type, tags
+    stability_word = "stable" if stable else "unstable"
+
+    env_label = f"{gear_word}, {stability_word}"
+
+    return env_label, tags
 
 
 def plot_time_series(timestamp, vpd, ppfd, temp, stress_segments):
-    """Create matplotlib figure of time series with shaded stress periods."""
-    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(10, 7))
+    """Create interactive Plotly time series with shaded stress periods."""
+    # Shared x-axis
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        subplot_titles=("VPD", "PPFD", "Temperature"),
+    )
 
-    x = timestamp if timestamp is not None else range(len(vpd))
+    x = timestamp if timestamp is not None else list(range(len(vpd)))
 
-    axes[0].plot(x, vpd, label="VPD")
-    axes[0].set_ylabel("VPD (kPa)")
-    axes[0].legend(loc="upper right")
+    # VPD
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=pd.to_numeric(vpd, errors="coerce"),
+            mode="lines",
+            name="VPD (kPa)",
+            hovertemplate="Time: %{x}<br>VPD: %{y:.2f} kPa<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
 
-    axes[1].plot(x, ppfd, label="PPFD")
-    axes[1].set_ylabel("PPFD (µmol m⁻² s⁻¹)")
-    axes[1].legend(loc="upper right")
+    # PPFD
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=pd.to_numeric(ppfd, errors="coerce"),
+            mode="lines",
+            name="PPFD (µmol m⁻² s⁻¹)",
+            hovertemplate="Time: %{x}<br>PPFD: %{y:.0f} µmol m⁻² s⁻¹<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
 
-    axes[2].plot(x, temp, label="Temperature")
-    axes[2].set_ylabel("Temp (°C)")
-    axes[2].legend(loc="upper right")
-    axes[2].set_xlabel("Time" if timestamp is not None else "Hour index")
+    # Temperature
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=pd.to_numeric(temp, errors="coerce"),
+            mode="lines",
+            name="Temperature (°C)",
+            hovertemplate="Time: %{x}<br>Temp: %{y:.2f} °C<extra></extra>",
+        ),
+        row=3,
+        col=1,
+    )
 
     # Shade stress segments
-    used_labels = set()
     for seg in stress_segments:
         start = seg["start"]
         end = seg["end"]
-        label = seg["label"]
         color = seg["color"]
-        for ax in axes:
-            ax.axvspan(start, end, color=color, alpha=0.15,
-                       label=label if label not in used_labels else None)
-        used_labels.add(label)
+        label = seg["label"]
 
-    axes[0].legend(loc="upper right")
-    fig.tight_layout()
+        # Add a semi-transparent vertical band across all rows
+        for row in [1, 2, 3]:
+            fig.add_vrect(
+                x0=start,
+                x1=end,
+                fillcolor=color,
+                opacity=0.15,
+                line_width=0,
+                row=row,
+                col=1,
+                annotation_text=None,
+            )
+
+    fig.update_yaxes(title_text="VPD (kPa)", row=1, col=1)
+    fig.update_yaxes(title_text="PPFD (µmol m⁻² s⁻¹)", row=2, col=1)
+    fig.update_yaxes(title_text="Temp (°C)", row=3, col=1)
+
+    fig.update_xaxes(title_text="Time", row=3, col=1)
+
+    fig.update_layout(
+        height=700,
+        margin=dict(l=60, r=20, t=40, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+
     return fig
-
 
 # ----------------- Streamlit UI wrapper class ----------------- #
 
@@ -590,24 +641,15 @@ class ClimateAnalyzerUI:
         )
 
         fig = plot_time_series(
-            timestamp=ts_for_analysis,
-            vpd=df_work[vpd_col],
-            ppfd=df_work[ppfd_col],
-            temp=df_work[temp_col],
-            stress_segments=stress_segments,
-        )
-        st.markdown("### Time series view")
-        st.pyplot(fig)
+    timestamp=ts_for_analysis,
+    vpd=df_work[vpd_col],
+    ppfd=df_work[ppfd_col],
+    temp=df_work[temp_col],
+    stress_segments=stress_segments,
+)
 
-        # Optional: download figure
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
-        st.download_button(
-            "Download plot (PNG)",
-            data=buf.getvalue(),
-            file_name="climate_timeseries.png",
-            mime="image/png",
-        )
+st.markdown("### Time series view")
+st.plotly_chart(fig, use_container_width=True)
 
     @staticmethod
     def _format_metrics(label: str, m: dict, config: dict) -> str:
@@ -623,16 +665,17 @@ class ClimateAnalyzerUI:
                 return str(x)
 
         lines = [f"--- {label} ---"]
-        lines.append(f" n_hours: {m['n_hours']}")
-        lines.append(f" mean: {fmt(m['mean'])}")
-        lines.append(f" sd: {fmt(m['sd'])}")
-        lines.append(f" cv: {fmt(m['cv'])}")
+        lines.append(f" n_hours: {m['n_hours']}  (number of hourly records in this window)")
+        lines.append(f" mean: {fmt(m['mean'])}  (average {label} over the window)")
+        lines.append(f" sd: {fmt(m['sd'])}  (standard deviation — how spread out values are)")
+        lines.append(f" cv: {fmt(m['cv'])}  (relative variability; >0.5 means quite variable)")
 
         thresh = config.get("stress_high", None)
         if thresh is not None:
             lines.append(
                 f" hours_above_stress (>{thresh}): {m['hours_above_stress']} "
-                f"({fmt(m['pct_above_stress'])} %)"
+                f"({fmt(m['pct_above_stress'])} %)  "
+                f"(time spent above the stress limit)"
             )
         else:
             lines.append(" hours_above_stress: NA")
@@ -641,20 +684,31 @@ class ClimateAnalyzerUI:
         if opt_low is not None:
             lines.append(
                 f" hours_below_optimal (<{opt_low}): {m['hours_below_optimal']} "
-                f"({fmt(m['pct_below_optimal'])} %)"
+                f"({fmt(m['pct_below_optimal'])} %)  "
+                f"(time spent below the lower comfort zone)"
             )
         else:
             lines.append(" hours_below_optimal: NA")
 
-        lines.append(f" lag1_autocorr: {fmt(m['lag1_autocorr'])}")
-        lines.append(f" mean_abs_delta: {fmt(m['mean_abs_delta'])}")
-        lines.append(f" max_abs_delta: {fmt(m['max_abs_delta'])}")
+        lines.append(
+            f" lag1_autocorr: {fmt(m['lag1_autocorr'])}  "
+            f"(how similar each hour is to the previous one; closer to 1 = smoother trends)"
+        )
+        lines.append(
+            f" mean_abs_delta: {fmt(m['mean_abs_delta'])}  "
+            f"(average hour-to-hour change in {label})"
+        )
+        lines.append(
+            f" max_abs_delta: {fmt(m['max_abs_delta'])}  "
+            f"(largest single jump between two hours)"
+        )
 
         spike_delta = config.get("spike_delta", None)
         if spike_delta is not None:
             lines.append(
                 f" n_spikes (|Δ|>{spike_delta}): {m['n_spikes']}, "
-                f"max_spike={fmt(m['max_spike'])}"
+                f"max_spike={fmt(m['max_spike'])}  "
+                f"(number and size of large jumps)"
             )
         else:
             lines.append(" spikes: NA")
