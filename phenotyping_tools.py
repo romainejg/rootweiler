@@ -1,8 +1,6 @@
 # phenotyping_tools.py
 
 import os
-import io
-import json
 import tempfile
 from typing import List, Tuple, Optional, Any
 
@@ -22,26 +20,27 @@ except Exception:
 # Roboflow config – EDIT IF NEEDED
 # -------------------------------
 ROBOFLOW_WORKSPACE = "rootweiler"
-ROBOFLOW_WORKFLOW_ID = "find-leaves-3"
+ROBOFLOW_WORKFLOW_ID = "leafy"  # your updated workflow
+
 
 BBox = Tuple[int, int, int, int]  # (x, y, w, h)
 
 
 # =========================================================
-# 1. Grid calibration – reuse your “squares” logic
+# 1. Grid calibration – same idea as your old square logic
 # =========================================================
 
 def calculate_pixels_per_cm2_and_squares(
     image_bgr: np.ndarray,
 ) -> Tuple[Optional[float], List[BBox]]:
     """
-    Estimate pixels per cm² using square-like objects in the image,
-    following the same logic from your old code:
+    Estimate pixels per cm² using square-like objects in the image.
+    Logic mirrors your earlier code:
 
       - find contours on Canny edges
       - keep near-square bounding boxes (w ≈ h)
       - require area > 1000 px
-      - if not enough squares, return None
+      - need at least 20 squares for a stable estimate
 
     Returns:
       pixels_per_cm2 (float | None),
@@ -57,7 +56,7 @@ def calculate_pixels_per_cm2_and_squares(
         x, y, w, h = cv2.boundingRect(cnt)
         if w <= 0 or h <= 0:
             continue
-        # near-square
+        # near-square + not tiny
         if abs(w - h) < 10 and w * h > 1000:
             squares.append((x, y, w, h))
 
@@ -76,7 +75,7 @@ def calculate_pixels_per_cm2_and_squares(
     selected = squares_sorted[:20]
 
     average_area = float(np.mean([w * h for (_, _, w, h) in selected]))
-    pixels_per_cm2 = average_area
+    pixels_per_cm2 = average_area  # 1 cm² ≈ this many pixels
 
     return pixels_per_cm2, selected
 
@@ -91,7 +90,7 @@ def segment_leaves_hsv(image_bgr: np.ndarray) -> np.ndarray:
     """
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
 
-    # Broad green band – may be tuned later.
+    # Broad green-ish range; can be tuned
     lower_green = np.array([25, 30, 30])
     upper_green = np.array([95, 255, 255])
     mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -142,10 +141,15 @@ def _call_roboflow_workflow(
         tmp_path = tmp.name
 
     try:
+        # NOTE: we do NOT pass use_cache here to stay compatible with
+        # the SDK version that previously complained about that kwarg.
         result = client.run_workflow(
             workspace_name=ROBOFLOW_WORKSPACE,
             workflow_id=ROBOFLOW_WORKFLOW_ID,
             images={"image": tmp_path},
+            parameters={
+                "output_message": "Your model is being initialized, try again in a few seconds."
+            },
         )
     finally:
         try:
@@ -182,10 +186,10 @@ def parse_roboflow_leaf_polygons(
     image_shape: Tuple[int, int, int],
 ) -> Optional[List[np.ndarray]]:
     """
-    Try to turn Roboflow workflow output into a list of leaf instance polygons.
+    Turn Roboflow workflow output into a list of leaf instance polygons.
 
     We look through the structure for 'predictions' lists containing objects
-    with a 'points' key (list of [x, y]).
+    with a 'points' (or similar) key: list of [x, y].
 
     Returns:
       list of contours (opencv-style Nx1x2 int32 arrays), or None if nothing usable.
@@ -234,7 +238,11 @@ def segment_leaves_with_roboflow(
 
     Raises if anything goes wrong so caller can fall back.
     """
-    rf_result = _call_roboflow_workflow(image_bytes=image_bytes, filename=filename, api_key=api_key)
+    rf_result = _call_roboflow_workflow(
+        image_bytes=image_bytes,
+        filename=filename,
+        api_key=api_key,
+    )
     polygons = parse_roboflow_leaf_polygons(rf_result, image_bgr.shape)
 
     if not polygons:
@@ -247,8 +255,7 @@ def segment_leaves_with_roboflow(
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-    # Contours are just these polygons (we could re-find, but polygons are fine)
-    contours = polygons
+    contours = polygons  # treat polygons as contours
 
     return mask, contours
 
@@ -275,7 +282,7 @@ class PhenotypingUI:
             Upload a canopy image. Rootweiler will:
 
             - Estimate physical scale using the 1 cm² background grid  
-            - Run a **Roboflow instance segmentation** workflow (if configured)  
+            - Run a **Roboflow instance segmentation** workflow (`leafy`)  
             - Fall back to a simple color-based mask if the workflow fails  
             - Count leaves and estimate individual leaf areas (cm²)
             """
@@ -332,6 +339,7 @@ class PhenotypingUI:
                 use_column_width=True,
             )
 
+        # Roboflow API key from Streamlit secrets
         api_key = st.secrets.get("ROBOFLOW_API_KEY") if hasattr(st, "secrets") else None
 
         if _ROBOFLOW_AVAILABLE and api_key:
@@ -362,7 +370,6 @@ class PhenotypingUI:
                 )
                 method_label = "Roboflow instance segmentation"
             except Exception:
-                # Fall back to HSV
                 mask = segment_leaves_hsv(image_bgr)
                 contours = extract_leaf_contours(mask)
                 method_label = "Color-based fallback"
