@@ -1,17 +1,96 @@
-# Byte-compiled / optimized files
+# =========================================================
+# Python
+# =========================================================
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
 
-# Virtual environment files
-venv/
+# Virtual environments
 .venv/
-env/
-.env
+venv/
+ENV/
 
-# Streamlit secrets (CRUCIAL for security)
-# This prevents your API keys from being committed to GitHub.
+# =========================================================
+# Streamlit
+# =========================================================
 .streamlit/secrets.toml
 
-# Operating System files
+# Streamlit runtime cache (created dynamically)
+.streamlit/.cache/
+
+# =========================================================
+# VS Code / Dev Containers
+# =========================================================
+.vscode/
+.devcontainer/.bash_history
+.devcontainer/.cache
+.devcontainer/.vscode/
+
+# =========================================================
+# OS / Editor junk
+# =========================================================
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*~
+
+# =========================================================
+# Logs
+# =========================================================
+*.log
+
+# =========================================================
+# Jupyter / notebooks (if you experiment)
+# =========================================================
+.ipynb_checkpoints/
+
+# =========================================================
+# Data uploads / generated files
+# =========================================================
+# Uncomment these if you start saving uploads locally
+# data/
+# uploads/
+# output/
+# exports/
+
+# Excel temp files
+~$*.xlsx
+~$*.xls
+
+# =========================================================
+# Images / exports (optional)
+# =========================================================
+# Ignore generated figures but keep source images
+# figures/
+# plots/
+
+# =========================================================
+# Environment / secrets
+# =========================================================
+.env
+.env.*
+*.key
+*.pem
+
+# =========================================================
+# Coverage / testing
+# =========================================================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# =========================================================
+# Ruff / formatting
+# =========================================================
+.ruff_cache/
+
+# =========================================================
+# Misc
+# =========================================================
+.cache/
