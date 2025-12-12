@@ -376,7 +376,15 @@ def render_climate():
         """
     )
     st.markdown("---")
-    climate_analyzer.ClimateAnalyzerUI.render()
+
+    tabs = st.tabs(["Climate Analyzer", "Feedback Loop Builder"])
+
+    with tabs[0]:
+        climate_analyzer.ClimateAnalyzerUI.render()
+
+    with tabs[1]:
+        climate_analyzer.ClimateFeedbackLoopUI.render()
+
 
 # -----------------------
 # Section: Imaging
@@ -699,6 +707,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
