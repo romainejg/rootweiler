@@ -498,73 +498,90 @@ class ImagingToolsUI:
         )
 
         # Choose interaction method
+        use_manual_mode = False
+        
         if CANVAS_AVAILABLE:
-            st.caption("Draw a rectangle around the object you want to crop.")
-            
-            # Get image dimensions
-            height, width = img_array.shape[:2]
-            
-            # Scale canvas to fit screen (max 700px wide)
-            max_canvas_width = 700
-            if width > max_canvas_width:
-                scale = max_canvas_width / width
-                canvas_width = max_canvas_width
-                canvas_height = int(height * scale)
-            else:
-                scale = 1.0
-                canvas_width = width
-                canvas_height = height
-            
-            # Create canvas for drawing
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 0, 0, 0.0)",  # Transparent fill
-                stroke_width=2,
-                stroke_color="#FF0000",
-                background_image=Image.fromarray(img_array),
-                update_streamlit=True,
-                height=canvas_height,
-                width=canvas_width,
-                drawing_mode="rect",
-                key="object_crop_canvas",
-            )
-            
-            # Process canvas result
-            if canvas_result.json_data is not None:
-                objects = canvas_result.json_data.get("objects", [])
+            try:
+                st.caption("Draw a rectangle around the object you want to crop.")
                 
-                if len(objects) == 0:
+                # Get image dimensions
+                height, width = img_array.shape[:2]
+                
+                # Scale canvas to fit screen (max 700px wide)
+                max_canvas_width = 700
+                if width > max_canvas_width:
+                    scale = max_canvas_width / width
+                    canvas_width = max_canvas_width
+                    canvas_height = int(height * scale)
+                else:
+                    scale = 1.0
+                    canvas_width = width
+                    canvas_height = height
+                
+                # Create canvas for drawing
+                canvas_result = st_canvas(
+                    fill_color="rgba(255, 0, 0, 0.0)",  # Transparent fill
+                    stroke_width=2,
+                    stroke_color="#FF0000",
+                    background_image=Image.fromarray(img_array),
+                    update_streamlit=True,
+                    height=canvas_height,
+                    width=canvas_width,
+                    drawing_mode="rect",
+                    key="object_crop_canvas",
+                )
+                
+                # Process canvas result
+                if canvas_result.json_data is not None:
+                    objects = canvas_result.json_data.get("objects", [])
+                    
+                    if len(objects) == 0:
+                        st.info("Draw a rectangle on the image to select the object region.")
+                        return
+                    
+                    # Get the last drawn rectangle
+                    rect = objects[-1]
+                    
+                    # Extract coordinates and scale back to original image size
+                    canvas_x0 = rect["left"]
+                    canvas_y0 = rect["top"]
+                    canvas_width_rect = rect["width"]
+                    canvas_height_rect = rect["height"]
+                    
+                    # Scale back to original image coordinates
+                    # Guard against division by zero (though scale should always be > 0)
+                    if scale > 0:
+                        x0 = int(canvas_x0 / scale)
+                        y0 = int(canvas_y0 / scale)
+                        x1 = int((canvas_x0 + canvas_width_rect) / scale)
+                        y1 = int((canvas_y0 + canvas_height_rect) / scale)
+                    else:
+                        x0, y0, x1, y1 = 0, 0, width, height
+                    
+                    bbox = (x0, y0, x1, y1)
+                    
+                    st.markdown(f"**Selected region:** ({x0}, {y0}) to ({x1}, {y1})")
+                    
+                else:
                     st.info("Draw a rectangle on the image to select the object region.")
                     return
-                
-                # Get the last drawn rectangle
-                rect = objects[-1]
-                
-                # Extract coordinates and scale back to original image size
-                canvas_x0 = rect["left"]
-                canvas_y0 = rect["top"]
-                canvas_width_rect = rect["width"]
-                canvas_height_rect = rect["height"]
-                
-                # Scale back to original image coordinates
-                # Guard against division by zero (though scale should always be > 0)
-                if scale > 0:
-                    x0 = int(canvas_x0 / scale)
-                    y0 = int(canvas_y0 / scale)
-                    x1 = int((canvas_x0 + canvas_width_rect) / scale)
-                    y1 = int((canvas_y0 + canvas_height_rect) / scale)
-                else:
-                    x0, y0, x1, y1 = 0, 0, width, height
-                
-                bbox = (x0, y0, x1, y1)
-                
-                st.markdown(f"**Selected region:** ({x0}, {y0}) to ({x1}, {y1})")
-                
-            else:
-                st.info("Draw a rectangle on the image to select the object region.")
-                return
+                    
+            except AttributeError:
+                # Canvas component incompatibility - fall back to manual mode
+                st.error("Canvas component compatibility issue detected. Using manual bounding box entry instead.")
+                use_manual_mode = True
         else:
+            use_manual_mode = True
+        
+        if use_manual_mode:
             # Fallback: manual bbox input
-            st.warning("streamlit-drawable-canvas not available. Using manual input mode.")
+            if CANVAS_AVAILABLE:
+                # Canvas was available but failed - already showed error message above
+                pass
+            else:
+                # Canvas library not installed
+                st.warning("streamlit-drawable-canvas not available. Using manual input mode.")
+            
             st.caption("Enter the bounding box coordinates manually.")
             
             col1, col2 = st.columns(2)
