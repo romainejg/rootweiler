@@ -566,9 +566,9 @@ class ImagingToolsUI:
                     st.info("Draw a rectangle on the image to select the object region.")
                     return
                     
-            except AttributeError as e:
+            except AttributeError:
                 # Canvas component incompatibility - fall back to manual mode
-                st.error("Object Crop requires Streamlit 1.40.0 due to a canvas component compatibility issue. Using manual bounding box entry instead.")
+                st.error("Canvas component compatibility issue detected. Using manual bounding box entry instead.")
                 use_manual_mode = True
         else:
             use_manual_mode = True
