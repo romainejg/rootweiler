@@ -1099,9 +1099,19 @@ class ClimateAnalyzerUI:
 
         # Compute DLI metrics from light column (only if appropriate)
         # DLI is only valid for photon flux measurements (µmol m⁻² s⁻¹)
-        # For now, we compute it for both PPFD and PAR assuming they're in correct units
-        # In future, could add unit detection logic here
-        dli_metrics = compute_dli_metrics(df_work[light_col], ts_for_analysis, step_seconds)
+        light_data = pd.to_numeric(df_work[light_col], errors='coerce').dropna()
+        light_mean = light_data.mean() if len(light_data) > 0 else 0
+        
+        # Check if PAR might be in W/m² (typical range 0-500) vs µmol m⁻² s⁻¹ (typical 0-2000)
+        if light_type == "PAR" and light_mean > 0:
+            if light_mean < 100 and light_data.max() < 600:
+                st.warning("⚠️ PAR values appear to be in W/m² rather than µmol m⁻² s⁻¹. DLI calculation may not be accurate. Consider converting to photon flux units or selecting a different light type.")
+                # Still compute DLI but it will be less meaningful
+                dli_metrics = compute_dli_metrics(df_work[light_col], ts_for_analysis, step_seconds)
+            else:
+                dli_metrics = compute_dli_metrics(df_work[light_col], ts_for_analysis, step_seconds)
+        else:
+            dli_metrics = compute_dli_metrics(df_work[light_col], ts_for_analysis, step_seconds)
 
         # Classification (use PPFD key for light data regardless of type)
         light_results = results.get(light_type, {})
