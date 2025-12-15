@@ -577,14 +577,14 @@ class ImagingToolsUI:
             preview_img = img.copy()
             draw = ImageDraw.Draw(preview_img)
             draw.rectangle([x0, y0, x1, y1], outline="red", width=3)
-            st.image(preview_img, caption="Preview with bounding box", use_column_width=True)
+            st.image(preview_img, caption="Preview with bounding box", use_container_width=True)
 
         # Generate cropped square
         try:
             cropped_square = crop_square_png(img, bbox, pad_factor)
             
             st.markdown("#### Preview")
-            st.image(cropped_square, caption=f"Cropped square ({cropped_square.width}×{cropped_square.height} px)", use_column_width=True)
+            st.image(cropped_square, caption=f"Cropped square ({cropped_square.width}×{cropped_square.height} px)", use_container_width=True)
             
             # Prepare download
             output_buffer = io.BytesIO()
