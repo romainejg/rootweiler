@@ -23,6 +23,11 @@ THRESHOLDS = {
         "optimal_low": 200.0,  # µmol m⁻² s⁻¹
         "spike_delta": 200.0   # µmol m⁻² s⁻¹
     },
+    "PAR": {
+        "stress_high": 1000.0, # µmol m⁻² s⁻¹ (same as PPFD)
+        "optimal_low": 200.0,  # µmol m⁻² s⁻¹
+        "spike_delta": 200.0   # µmol m⁻² s⁻¹
+    },
     "Temperature": {
         "stress_high": 30.0,   # °C
         "optimal_low": 18.0,   # °C
@@ -36,6 +41,13 @@ STRESS_WINDOWS = {
     "low_vpd_min_run": 12,   # consecutive hours of low VPD to flag glassiness/humidity risk
     "high_ppfd_min_run": 4   # consecutive hours of very high PPFD to flag photoinhibition risk
 }
+
+# Detection constants
+RH_FRACTION_MAX = 1.2  # Max value for RH as fraction (0-1); allows slight overshoot
+RH_PERCENTAGE_MAX = 105  # Max value for RH as percentage (0-100); allows slight overshoot
+PAR_LOW_THRESHOLD = 100  # PAR values below this might be in W/m² not µmol m⁻² s⁻¹
+PAR_MAX_WM2 = 600  # Typical max for PAR in W/m²
+
 
 
 # ----------------- File loading and inference helpers ----------------- #
@@ -230,8 +242,8 @@ def infer_env_columns(df):
             rh_reasons.append("name matches 'RH/humidity'")
         
         # RH can be 0-1 (fraction) or 0-100 (percentage)
-        if (0 <= mean_val <= 1 and min_val >= 0 and max_val <= 1.2) or \
-           (0 <= mean_val <= 100 and min_val >= 0 and max_val <= 105):
+        if (0 <= mean_val <= 1 and min_val >= 0 and max_val <= RH_FRACTION_MAX) or \
+           (0 <= mean_val <= 100 and min_val >= 0 and max_val <= RH_PERCENTAGE_MAX):
             rh_score += 30
             rh_reasons.append(f"values in RH range (mean={mean_val:.1f})")
         
@@ -263,7 +275,7 @@ def compute_vpd_from_temp_rh(temp_c: pd.Series, rh: pd.Series) -> pd.Series:
     
     # Normalize RH to 0-100 range
     # If values are between 0-1, multiply by 100
-    if rh_vals.max() <= 1.2:  # Assume it's fractional
+    if rh_vals.max() <= RH_FRACTION_MAX:  # Assume it's fractional
         rh_vals = rh_vals * 100.0
     
     # Clamp RH to valid range
@@ -1092,7 +1104,7 @@ class ClimateAnalyzerUI:
 
         # Analyze each variable
         for label, col in [("VPD", use_vpd_col), (light_type, light_col), ("Temperature", temp_col)]:
-            config = THRESHOLDS.get(label if label in THRESHOLDS else "PPFD", {})
+            config = THRESHOLDS.get(label, {})
             m = analyze_series(df_work[col], label, config)
             results[label] = m
             metrics_text.append(cls._format_metrics(label, m, config))
@@ -1104,7 +1116,7 @@ class ClimateAnalyzerUI:
         
         # Check if PAR might be in W/m² (typical range 0-500) vs µmol m⁻² s⁻¹ (typical 0-2000)
         if light_type == "PAR" and light_mean > 0:
-            if light_mean < 100 and light_data.max() < 600:
+            if light_mean < PAR_LOW_THRESHOLD and light_data.max() < PAR_MAX_WM2:
                 st.warning("⚠️ PAR values appear to be in W/m² rather than µmol m⁻² s⁻¹. DLI calculation may not be accurate. Consider converting to photon flux units or selecting a different light type.")
                 # Still compute DLI but it will be less meaningful
                 dli_metrics = compute_dli_metrics(df_work[light_col], ts_for_analysis, step_seconds)
