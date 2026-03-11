@@ -337,6 +337,7 @@ def render_calculators():
         [
             "Daily Light Integral (DLI)",
             "Vapor Pressure Deficit (VPD)",
+            "Humidity Deficit (HD)",
             "Plants per m²",
             "Unit Converter",
         ]
@@ -349,9 +350,12 @@ def render_calculators():
         calculators.VPDCalculator.render()
 
     with tabs[2]:
-        calculators.GutterPlantDensityCalculator.render()
+        calculators.HumidityDeficitCalculator.render()
 
     with tabs[3]:
+        calculators.GutterPlantDensityCalculator.render()
+
+    with tabs[4]:
         calculators.UnitConverterCalculator.render()
 
 

@@ -138,6 +138,115 @@ class VPDCalculator:
             st.info("Set relative humidity between 0 and 100% to calculate VPD.")
 
 
+class HumidityDeficitCalculator:
+    """Humidity Deficit (HD) calculator for greenhouse management."""
+
+    @staticmethod
+    def compute_saturation_absolute_humidity(temp_c: float) -> float:
+        """
+        Compute Saturation Absolute Humidity (AHs) in g/m³ at the given temperature.
+        Uses the Tetens equation for saturation vapor pressure, then converts via
+        the ideal gas law: AHs = (es_Pa × Mw) / (R × T_K)
+        where Mw = 18.016 g/mol and R = 8.314 J/(mol·K).
+        Reference: At 23 °C, AHs ≈ 20.56 g/m³.
+        """
+        es_kpa = 0.6108 * np.exp((17.27 * temp_c) / (temp_c + 237.3))
+        es_pa = es_kpa * 1000.0
+        t_k = temp_c + 273.15
+        ahs = (es_pa * 18.016) / (8.314 * t_k)
+        return max(ahs, 0.0)
+
+    @classmethod
+    def compute_hd(cls, temp_c: float, rh: float) -> float:
+        """
+        Compute Humidity Deficit in g/m³.
+        HD = AHs × (1 − RH/100)
+        """
+        if rh < 0 or rh > 100:
+            return 0.0
+        ahs = cls.compute_saturation_absolute_humidity(temp_c)
+        return ahs * (1.0 - rh / 100.0)
+
+    @staticmethod
+    def interpret_hd_lettuce(hd: float) -> str:
+        """Return a brief interpretation of HD for lettuce cultivation."""
+        if hd < 3:
+            return "Too Humid – risk of tip burn and disease; increase ventilation."
+        elif hd <= 7:
+            return "Optimal – ideal range for lettuce growth."
+        else:
+            return "Too Dry – excessive transpiration stress; raise humidity."
+
+    @classmethod
+    def render(cls):
+        st.subheader("Humidity Deficit (HD)")
+
+        st.markdown(
+            """
+            Humidity Deficit describes the amount of water vapour the air can still
+            absorb before reaching saturation. It is a key driver of plant transpiration
+            in greenhouses.
+
+            This calculator uses:
+
+            - **Air temperature** (°C or °F)
+            - **Relative humidity** (%)
+
+            and returns HD in **g/m³**.
+
+            **Formula:**
+            1. Saturation Absolute Humidity *AHs* (g/m³) via the Tetens equation
+            2. *HD* = *AHs* × (1 − RH / 100)
+            """
+        )
+
+        col1, col2, col3 = st.columns([1, 1, 1])
+
+        with col1:
+            temp_unit = st.radio(
+                "Temperature unit",
+                ["°C", "°F"],
+                index=0,
+                horizontal=True,
+                key="hd_temp_unit",
+            )
+
+        with col2:
+            temp_input = st.number_input(
+                f"Air temperature ({temp_unit})",
+                value=23.0,
+                step=0.5,
+                key="hd_temp_input",
+            )
+
+        with col3:
+            rh = st.number_input(
+                "Relative Humidity (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=70.0,
+                step=1.0,
+                key="hd_rh",
+            )
+
+        if temp_unit == "°F":
+            temp_c = (temp_input - 32.0) * 5.0 / 9.0
+        else:
+            temp_c = temp_input
+
+        if 0 <= rh <= 100:
+            ahs = cls.compute_saturation_absolute_humidity(temp_c)
+            hd = cls.compute_hd(temp_c, rh)
+            interpretation = cls.interpret_hd_lettuce(hd)
+
+            st.markdown("### Result")
+            st.write(f"**Saturation Absolute Humidity (AHs): {ahs:.2f} g/m³**")
+            st.write(f"**Humidity Deficit (HD): {hd:.2f} g/m³**")
+            st.markdown(f"**Lettuce interpretation:** {interpretation}")
+        else:
+            st.info("Set relative humidity between 0 and 100% to calculate HD.")
+
+
 class GutterPlantDensityCalculator:
     """
     Calculator for plants per square meter in a gutter system.
