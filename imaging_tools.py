@@ -22,8 +22,6 @@ class ImagingToolsUI:
 
     @classmethod
     def render(cls):
-        st.subheader("Imaging")
-
         tabs = st.tabs(["Image extractor", "Compressor"])
 
         with tabs[0]:
