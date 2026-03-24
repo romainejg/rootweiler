@@ -196,11 +196,17 @@ class HumidityDeficitCalculator:
     def interpret_hd_lettuce(hd: float) -> str:
         """Return a brief interpretation of HD for lettuce cultivation."""
         if hd < 3:
-            return "Too Humid – risk of tip burn and disease; increase ventilation."
+            return (
+                "Too Humid – transpiration strongly reduced; increased risk of "
+                "glassiness (watersoaking of leaf tissue) and disease. Increase ventilation."
+            )
         elif hd <= 7:
             return "Optimal – ideal range for lettuce growth."
         else:
-            return "Too Dry – excessive transpiration stress; raise humidity."
+            return (
+                "Too Dry – excessive transpiration; increased risk of tipburn "
+                "due to rapid water loss from leaf edges. Raise humidity."
+            )
 
     @classmethod
     def render(cls):
@@ -288,6 +294,27 @@ class VPDHDCalculator:
               crop transpiration.
             - **HD** (g/m³) — the amount of water vapour the air can still absorb
               before saturation; directly linked to lettuce transpiration rates.
+            """
+        )
+
+        st.markdown(
+            """
+            **Reference ranges for lettuce:**
+
+            | Period | Target HD (g/m³) | Target VPD (kPa) | Notes |
+            |--------|-----------------|-----------------|-------|
+            | ☀️ Day  | 3 – 7           | 0.8 – 1.2        | Active transpiration, optimal growth |
+            | 🌙 Night | 1 – 3          | 0.3 – 0.8        | Reduced transpiration, lower disease risk |
+
+            - **Low values** (HD < 3 / VPD < 0.3 kPa): air is near saturation — high risk of
+              **glassiness** (watersoaking of leaf tissue) and fungal disease.
+            - **High values** (HD > 7 / VPD > 1.2 kPa): air is very dry — high risk of
+              **tipburn** from rapid water loss at leaf edges.
+
+            > ⚠️ **Measure humidity at canopy level.** The microclimate directly around the
+            > plant canopy can be significantly more humid (approaching >99% RH) than the ambient air
+            > due to leaf transpiration and limited airflow between leaves. Always use a sensor
+            > positioned at canopy height for accurate readings.
             """
         )
 
@@ -2337,3 +2364,383 @@ class DWCAnnualizedYieldCalculator:
                     f"{effective_plant_weight_kg:.4f} × {cycles_per_year:.2f} "
                     f"= **{y:.2f} kg/m²/year**"
                 )
+
+
+class MGSVarietySeedCalculator:
+    """
+    MGS Greenhouse Variety Seed Calculator.
+
+    For each crop variety (segment) in a greenhouse, calculates:
+    - Seeds used per production run  (lines × gutters/line × seeds/gutter)
+    - Percentage share of the total greenhouse seed usage
+    - Estimated seeds sown per year, accounting for different cycle times
+      in winter vs. summer
+
+    Inputs
+    ------
+    Global
+        total_lines        : Total number of lines in the greenhouse
+        winter_months      : Months per year that run at the longer winter cycle
+                             (the remainder are treated as summer)
+
+    Per variety
+        name               : Variety / segment label  (e.g. "Cristabel")
+        lines              : Lines dedicated to this variety
+        seeds_per_gutter   : Seeds sown per gutter for this variety
+        gutters_per_line   : Number of gutters that fit in one line
+        winter_cycle_days  : Crop cycle length in winter  (days)
+        summer_cycle_days  : Crop cycle length in summer  (days)
+
+    Formulae
+    --------
+    seeds_per_run  = lines × gutters_per_line × seeds_per_gutter
+    variety_%      = (seeds_per_run / total_seeds_per_run) × 100
+    winter_days    = winter_months × 30.4375          (365 / 12)
+    summer_days    = 365 − winter_days
+    cycles_per_yr  = (winter_days / winter_cycle) + (summer_days / summer_cycle)
+    seeds_per_year = seeds_per_run × cycles_per_yr
+    """
+
+    _DAYS_PER_MONTH: float = 365.0 / 12.0  # ≈ 30.44
+
+    # ------------------------------------------------------------------
+    # Pure calculation helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def compute_variety_stats(
+        cls,
+        lines: float,
+        seeds_per_gutter: float,
+        gutters_per_line: float,
+        winter_cycle_days: float,
+        summer_cycle_days: float,
+        winter_months: float,
+    ) -> dict:
+        """
+        Return per-variety metrics.
+
+        Returns a dict with keys:
+            seeds_per_run, winter_cycles, summer_cycles,
+            cycles_per_year, seeds_per_year
+        """
+        seeds_per_run = lines * gutters_per_line * seeds_per_gutter
+
+        winter_days = winter_months * cls._DAYS_PER_MONTH
+        summer_days = 365.0 - winter_days
+
+        winter_cycles = (winter_days / winter_cycle_days) if winter_cycle_days > 0 else 0.0
+        summer_cycles = (summer_days / summer_cycle_days) if summer_cycle_days > 0 else 0.0
+        cycles_per_year = winter_cycles + summer_cycles
+
+        seeds_per_year = seeds_per_run * cycles_per_year
+
+        return {
+            "seeds_per_run": seeds_per_run,
+            "winter_cycles": winter_cycles,
+            "summer_cycles": summer_cycles,
+            "cycles_per_year": cycles_per_year,
+            "seeds_per_year": seeds_per_year,
+        }
+
+    # ------------------------------------------------------------------
+    # Streamlit UI
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def render(cls):
+        st.subheader("MGS Variety Seed Calculator")
+
+        st.markdown(
+            """
+            Track how seeds are distributed across **crop varieties (segments)**
+            in the greenhouse.
+
+            For every variety enter the number of lines it occupies, the seeding
+            rate per gutter, and how many gutters fit in a line.  Optionally
+            provide separate **winter** and **summer** cycle times to get an
+            accurate estimate of annual seed usage.
+            """
+        )
+
+        # ── Global inputs ──────────────────────────────────────────────
+        st.markdown("#### Greenhouse settings")
+
+        g_col1, g_col2 = st.columns(2)
+        with g_col1:
+            total_lines = st.number_input(
+                "Total lines in greenhouse",
+                min_value=1,
+                value=20,
+                step=1,
+                key="mgsvsc_total_lines",
+                help="Total number of lines (rows) in the greenhouse.",
+            )
+        with g_col2:
+            winter_months = st.number_input(
+                "Winter months per year",
+                min_value=0.0,
+                max_value=12.0,
+                value=6.0,
+                step=0.5,
+                key="mgsvsc_winter_months",
+                help=(
+                    "Months per year that use the *winter* cycle time.  "
+                    "The remaining months use the *summer* cycle time."
+                ),
+            )
+
+        summer_months = 12.0 - winter_months
+        st.caption(
+            f"Winter: **{winter_months:.1f}** months "
+            f"({winter_months * cls._DAYS_PER_MONTH:.0f} days)  |  "
+            f"Summer: **{summer_months:.1f}** months "
+            f"({summer_months * cls._DAYS_PER_MONTH:.0f} days)"
+        )
+
+        st.markdown("---")
+
+        # ── Number of varieties ────────────────────────────────────────
+        st.markdown("#### Varieties (segments)")
+
+        num_varieties = st.number_input(
+            "Number of varieties",
+            min_value=1,
+            max_value=20,
+            value=3,
+            step=1,
+            key="mgsvsc_num_varieties",
+        )
+
+        # ── Per-variety inputs ─────────────────────────────────────────
+        variety_inputs: list[dict] = []
+        for i in range(int(num_varieties)):
+            with st.expander(f"Variety {i + 1}", expanded=True):
+                v_col1, v_col2 = st.columns([2, 1])
+                with v_col1:
+                    name = st.text_input(
+                        "Variety name",
+                        value=["Cristabel", "Crispyano", "Litska"][i]
+                        if i < 3
+                        else f"Variety {i + 1}",
+                        key=f"mgsvsc_name_{i}",
+                    )
+                with v_col2:
+                    lines = st.number_input(
+                        "Lines",
+                        min_value=0.0,
+                        value=float(max(1, total_lines // int(num_varieties))),
+                        step=1.0,
+                        key=f"mgsvsc_lines_{i}",
+                        help="Number of lines in the greenhouse allocated to this variety.",
+                    )
+
+                s_col1, s_col2 = st.columns(2)
+                with s_col1:
+                    seeds_per_gutter = st.number_input(
+                        "Seeds per gutter",
+                        min_value=0.0,
+                        value=18.0,
+                        step=1.0,
+                        key=f"mgsvsc_spg_{i}",
+                    )
+                with s_col2:
+                    gutters_per_line = st.number_input(
+                        "Gutters per line",
+                        min_value=0.0,
+                        value=10.0,
+                        step=1.0,
+                        key=f"mgsvsc_gpl_{i}",
+                    )
+
+                c_col1, c_col2 = st.columns(2)
+                with c_col1:
+                    winter_cycle = st.number_input(
+                        "Winter cycle time (days)",
+                        min_value=1.0,
+                        value=28.0,
+                        step=1.0,
+                        key=f"mgsvsc_wc_{i}",
+                        help="Full crop cycle length during winter months.",
+                    )
+                with c_col2:
+                    summer_cycle = st.number_input(
+                        "Summer cycle time (days)",
+                        min_value=1.0,
+                        value=24.0,
+                        step=1.0,
+                        key=f"mgsvsc_sc_{i}",
+                        help="Full crop cycle length during summer months.",
+                    )
+
+                variety_inputs.append(
+                    {
+                        "name": name.strip() or f"Variety {i + 1}",
+                        "lines": lines,
+                        "seeds_per_gutter": seeds_per_gutter,
+                        "gutters_per_line": gutters_per_line,
+                        "winter_cycle": winter_cycle,
+                        "summer_cycle": summer_cycle,
+                    }
+                )
+
+        # ── Validation ─────────────────────────────────────────────────
+        lines_used = sum(v["lines"] for v in variety_inputs)
+        if lines_used > total_lines:
+            st.warning(
+                f"Lines used by varieties ({lines_used:.0f}) exceeds the total "
+                f"lines in the greenhouse ({total_lines}).  "
+                "Results are still shown but please verify your inputs."
+            )
+
+        # ── Compute ────────────────────────────────────────────────────
+        rows: list[dict] = []
+        total_seeds_run = 0.0
+        total_seeds_yr = 0.0
+
+        for v in variety_inputs:
+            stats = cls.compute_variety_stats(
+                lines=v["lines"],
+                seeds_per_gutter=v["seeds_per_gutter"],
+                gutters_per_line=v["gutters_per_line"],
+                winter_cycle_days=v["winter_cycle"],
+                summer_cycle_days=v["summer_cycle"],
+                winter_months=winter_months,
+            )
+            rows.append(
+                {
+                    "Variety": v["name"],
+                    "Lines": v["lines"],
+                    "Gutters/Line": v["gutters_per_line"],
+                    "Seeds/Gutter": v["seeds_per_gutter"],
+                    "Seeds/Run": stats["seeds_per_run"],
+                    "Winter Cycle (days)": v["winter_cycle"],
+                    "Summer Cycle (days)": v["summer_cycle"],
+                    "Cycles/Year": stats["cycles_per_year"],
+                    "Seeds/Year": stats["seeds_per_year"],
+                    "_seeds_per_run": stats["seeds_per_run"],
+                    "_seeds_per_year": stats["seeds_per_year"],
+                }
+            )
+            total_seeds_run += stats["seeds_per_run"]
+            total_seeds_yr += stats["seeds_per_year"]
+
+        # Add percentage columns
+        for row in rows:
+            pct_run = (
+                (row["_seeds_per_run"] / total_seeds_run * 100)
+                if total_seeds_run > 0
+                else 0.0
+            )
+            pct_yr = (
+                (row["_seeds_per_year"] / total_seeds_yr * 100)
+                if total_seeds_yr > 0
+                else 0.0
+            )
+            row["% of Greenhouse (Run)"] = pct_run
+            row["% of Greenhouse (Year)"] = pct_yr
+
+        # ── Display results ────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### Results")
+
+        # Summary metrics
+        m_col1, m_col2, m_col3 = st.columns(3)
+        with m_col1:
+            st.metric(
+                "Total seeds per run",
+                f"{total_seeds_run:,.0f}",
+                help="Seeds sown across all varieties in a single production run.",
+            )
+        with m_col2:
+            st.metric(
+                "Total seeds per year",
+                f"{total_seeds_yr:,.0f}",
+                help="Estimated seeds sown per year summed over all varieties.",
+            )
+        with m_col3:
+            lines_pct = (lines_used / total_lines * 100) if total_lines > 0 else 0.0
+            st.metric(
+                "Lines utilisation",
+                f"{lines_pct:.1f}%",
+                help=f"{lines_used:.0f} of {total_lines} lines assigned to varieties.",
+            )
+
+        # Per-variety results table
+        st.markdown("#### Per-variety breakdown")
+
+        display_cols = [
+            "Variety",
+            "Lines",
+            "Seeds/Run",
+            "% of Greenhouse (Run)",
+            "Cycles/Year",
+            "Seeds/Year",
+            "% of Greenhouse (Year)",
+        ]
+        df = pd.DataFrame(rows)[display_cols].copy()
+
+        # Format numeric columns for readability
+        df["Seeds/Run"] = df["Seeds/Run"].map(lambda x: f"{x:,.0f}")
+        df["% of Greenhouse (Run)"] = df["% of Greenhouse (Run)"].map(
+            lambda x: f"{x:.1f}%"
+        )
+        df["Cycles/Year"] = df["Cycles/Year"].map(lambda x: f"{x:.2f}")
+        df["Seeds/Year"] = df["Seeds/Year"].map(lambda x: f"{x:,.0f}")
+        df["% of Greenhouse (Year)"] = df["% of Greenhouse (Year)"].map(
+            lambda x: f"{x:.1f}%"
+        )
+
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # Detailed table toggle
+        with st.expander("Show full detail table", expanded=False):
+            detail_cols = [
+                "Variety",
+                "Lines",
+                "Gutters/Line",
+                "Seeds/Gutter",
+                "Seeds/Run",
+                "% of Greenhouse (Run)",
+                "Winter Cycle (days)",
+                "Summer Cycle (days)",
+                "Cycles/Year",
+                "Seeds/Year",
+                "% of Greenhouse (Year)",
+            ]
+            df_detail = pd.DataFrame(rows)[detail_cols].copy()
+            df_detail["Seeds/Run"] = df_detail["Seeds/Run"].map(lambda x: f"{x:,.0f}")
+            df_detail["% of Greenhouse (Run)"] = df_detail[
+                "% of Greenhouse (Run)"
+            ].map(lambda x: f"{x:.1f}%")
+            df_detail["Cycles/Year"] = df_detail["Cycles/Year"].map(
+                lambda x: f"{x:.2f}"
+            )
+            df_detail["Seeds/Year"] = df_detail["Seeds/Year"].map(
+                lambda x: f"{x:,.0f}"
+            )
+            df_detail["% of Greenhouse (Year)"] = df_detail[
+                "% of Greenhouse (Year)"
+            ].map(lambda x: f"{x:.1f}%")
+            st.dataframe(df_detail, use_container_width=True, hide_index=True)
+
+        with st.expander("Show calculation details", expanded=False):
+            st.markdown("**Formulae used**")
+            st.markdown(
+                """
+                | Term | Formula |
+                |---|---|
+                | Seeds per run | lines × gutters per line × seeds per gutter |
+                | % of greenhouse (run) | seeds per run ÷ total seeds per run × 100 |
+                | Days per month | 365 ÷ 12 ≈ 30.44 |
+                | Winter days | winter months × days per month |
+                | Summer days | 365 − winter days |
+                | Cycles per year | (winter days ÷ winter cycle) + (summer days ÷ summer cycle) |
+                | Seeds per year | seeds per run × cycles per year |
+                | % of greenhouse (year) | seeds per year ÷ total seeds per year × 100 |
+                """
+            )
+            st.markdown(f"**Winter:** {winter_months:.1f} months = "
+                        f"{winter_months * cls._DAYS_PER_MONTH:.1f} days")
+            st.markdown(f"**Summer:** {summer_months:.1f} months = "
+                        f"{summer_months * cls._DAYS_PER_MONTH:.1f} days")
