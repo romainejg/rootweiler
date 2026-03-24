@@ -1160,6 +1160,14 @@ class MGSLettuceCalculator:
 
     _UNITS = ["m", "cm", "ft", "in"]
     _SQM_TO_SQFT = 10.7639  # 1 m² = 10.7639 ft²
+    _CFG_KEY = "mgs_density_cfg"
+
+    @classmethod
+    def _cfg(cls) -> dict:
+        """Return the persistent session-state config dict for this calculator."""
+        if cls._CFG_KEY not in st.session_state:
+            st.session_state[cls._CFG_KEY] = {}
+        return st.session_state[cls._CFG_KEY]
 
     @staticmethod
     def to_meters(value: float, unit: str) -> float:
@@ -1259,6 +1267,8 @@ class MGSLettuceCalculator:
             """
         )
 
+        cfg = cls._cfg()
+
         st.markdown("#### System inputs")
 
         col1, col2, col3 = st.columns([2, 1, 2])
@@ -1267,42 +1277,49 @@ class MGSLettuceCalculator:
             gutter_length_val = st.number_input(
                 "Gutter length",
                 min_value=0.0,
-                value=2.0,
+                value=cfg.get("gutter_length_val", 2.0),
                 step=0.1,
                 key="mgs_gutter_length_val",
             )
+            cfg["gutter_length_val"] = gutter_length_val
         with col2:
+            _gl_unit = cfg.get("gutter_length_unit", "m")
             gutter_length_unit = st.selectbox(
                 "Unit",
                 cls._UNITS,
-                index=0,
+                index=cls._UNITS.index(_gl_unit) if _gl_unit in cls._UNITS else 0,
                 key="mgs_gutter_length_unit",
             )
+            cfg["gutter_length_unit"] = gutter_length_unit
         with col3:
             seeds_per_gutter = st.number_input(
                 "Seeds per gutter",
                 min_value=0.0,
-                value=22.0,
+                value=cfg.get("seeds_per_gutter", 22.0),
                 step=1.0,
                 key="mgs_seeds_per_gutter",
             )
+            cfg["seeds_per_gutter"] = seeds_per_gutter
 
         col4, col5 = st.columns([2, 1])
         with col4:
             gutter_width_val = st.number_input(
                 "Gutter width",
                 min_value=0.0,
-                value=16.0,
+                value=cfg.get("gutter_width_val", 16.0),
                 step=1.0,
                 key="mgs_gutter_width_val",
             )
+            cfg["gutter_width_val"] = gutter_width_val
         with col5:
+            _gw_unit = cfg.get("gutter_width_unit", "cm")
             gutter_width_unit = st.selectbox(
                 "Unit",
                 cls._UNITS,
-                index=1,  # default: cm
+                index=cls._UNITS.index(_gw_unit) if _gw_unit in cls._UNITS else 1,
                 key="mgs_gutter_width_unit",
             )
+            cfg["gutter_width_unit"] = gutter_width_unit
 
         st.markdown("---")
         st.markdown("#### Zone configuration")
@@ -1311,46 +1328,58 @@ class MGSLettuceCalculator:
             "Number of zones",
             min_value=1,
             max_value=20,
-            value=2,
+            value=cfg.get("num_zones", 2),
             step=1,
             key="mgs_num_zones",
         )
+        cfg["num_zones"] = int(num_zones)
 
         # Collect per-zone inputs
         zone_inputs = []
+        zones_cfg = cfg.setdefault("zones", [])
         for i in range(int(num_zones)):
+            # Grow the saved zones list as needed
+            while len(zones_cfg) <= i:
+                zones_cfg.append({})
+            zc = zones_cfg[i]
+
             st.markdown(f"**Zone {i + 1}**")
             zc1, zc2, zc3, zc4 = st.columns([2, 2, 2, 1])
             with zc1:
                 zone_name = st.text_input(
                     "Zone name",
-                    value=f"Zone {i + 1}",
+                    value=zc.get("name", f"Zone {i + 1}"),
                     key=f"mgs_zone_name_{i}",
                 )
+                zc["name"] = zone_name
             with zc2:
                 days_in_zone = st.number_input(
                     "Days in zone",
                     min_value=0.0,
-                    value=7.0,
+                    value=zc.get("days_in_zone", 7.0),
                     step=1.0,
                     help="Number of days plants spend in this zone.",
                     key=f"mgs_days_in_zone_{i}",
                 )
+                zc["days_in_zone"] = days_in_zone
             with zc3:
                 zone_spacing_val = st.number_input(
                     "Zone spacing",
                     min_value=0.0,
-                    value=20.0,
+                    value=zc.get("spacing_val", 20.0),
                     step=1.0,
                     key=f"mgs_zone_spacing_val_{i}",
                 )
+                zc["spacing_val"] = zone_spacing_val
             with zc4:
+                _sp_unit = zc.get("spacing_unit", "cm")
                 zone_spacing_unit = st.selectbox(
                     "Unit",
                     cls._UNITS,
-                    index=1,  # default: cm
+                    index=cls._UNITS.index(_sp_unit) if _sp_unit in cls._UNITS else 1,
                     key=f"mgs_zone_spacing_unit_{i}",
                 )
+                zc["spacing_unit"] = zone_spacing_unit
             zone_inputs.append(
                 {
                     "name": zone_name,
@@ -1359,6 +1388,9 @@ class MGSLettuceCalculator:
                     "spacing_unit": zone_spacing_unit,
                 }
             )
+
+        # Trim stale zone entries when the user reduces the zone count
+        del zones_cfg[int(num_zones):]
 
         st.markdown("---")
 
@@ -1450,6 +1482,14 @@ class MGSAnnualizedYieldCalculator:
 
     _UNITS = ["m", "cm", "ft", "in"]
     _SQM_TO_SQFT = 10.7639
+    _CFG_KEY = "mgs_yield_cfg"
+
+    @classmethod
+    def _cfg(cls) -> dict:
+        """Return the persistent session-state config dict for this calculator."""
+        if cls._CFG_KEY not in st.session_state:
+            st.session_state[cls._CFG_KEY] = {}
+        return st.session_state[cls._CFG_KEY]
 
     @staticmethod
     def to_meters(value: float, unit: str) -> float:
@@ -1497,6 +1537,8 @@ class MGSAnnualizedYieldCalculator:
             """
         )
 
+        cfg = cls._cfg()
+
         # --- Weight inputs ---
         st.markdown("#### Weight inputs")
 
@@ -1506,40 +1548,44 @@ class MGSAnnualizedYieldCalculator:
             gutter_weight_g = st.number_input(
                 "Gutter weight (g)",
                 min_value=0.0,
-                value=0.0,
+                value=cfg.get("gutter_weight_g", 0.0),
                 step=50.0,
                 help="Total fresh weight of all plants in one gutter at harvest.",
                 key="mgs_yield_gutter_weight",
             )
+            cfg["gutter_weight_g"] = gutter_weight_g
             plants_per_gutter = st.number_input(
                 "Plants per gutter",
                 min_value=0.0,
-                value=22.0,
+                value=cfg.get("plants_per_gutter", 22.0),
                 step=1.0,
                 help="Number of plants in one gutter (used with gutter weight).",
                 key="mgs_yield_plants_per_gutter",
             )
+            cfg["plants_per_gutter"] = plants_per_gutter
 
         with wcol2:
             plant_weight_g = st.number_input(
                 "Single plant weight (g)",
                 min_value=0.0,
-                value=0.0,
+                value=cfg.get("plant_weight_g", 0.0),
                 step=5.0,
                 help="Average fresh weight per plant at harvest.",
                 key="mgs_yield_plant_weight",
             )
+            cfg["plant_weight_g"] = plant_weight_g
 
         with wcol3:
             weight_per_m2_kg = st.number_input(
                 "Fresh weight per m² (kg/m²)",
                 min_value=0.0,
-                value=0.0,
+                value=cfg.get("weight_per_m2_kg", 0.0),
                 step=0.5,
                 help="Total fresh weight per square metre of growing area at harvest. "
                      "Used directly — density inputs are not required.",
                 key="mgs_yield_weight_per_m2",
             )
+            cfg["weight_per_m2_kg"] = weight_per_m2_kg
 
         # --- Density inputs ---
         st.markdown("#### Density inputs")
@@ -1550,21 +1596,23 @@ class MGSAnnualizedYieldCalculator:
             avg_density = st.number_input(
                 "Average density (plants/m²)",
                 min_value=0.0,
-                value=0.0,
+                value=cfg.get("avg_density", 0.0),
                 step=10.0,
                 help="Weighted average density across all zones (propagation → harvest).",
                 key="mgs_yield_avg_density",
             )
+            cfg["avg_density"] = avg_density
 
         with dcol2:
             final_density = st.number_input(
                 "Final density (plants/m²)",
                 min_value=0.0,
-                value=0.0,
+                value=cfg.get("final_density", 0.0),
                 step=5.0,
                 help="Plant density in the final (harvest) zone.",
                 key="mgs_yield_final_density",
             )
+            cfg["final_density"] = final_density
 
         # --- Cycle time ---
         st.markdown("---")
@@ -1576,23 +1624,25 @@ class MGSAnnualizedYieldCalculator:
             cycle_time_days = st.number_input(
                 "Total cycle time (days, seed to harvest)",
                 min_value=1.0,
-                value=35.0,
+                value=cfg.get("cycle_time_days", 35.0),
                 step=1.0,
                 key="mgs_yield_cycle",
             )
+            cfg["cycle_time_days"] = cycle_time_days
             germ_time_hrs = st.number_input(
                 "Germination time (hrs)",
                 min_value=0.0,
-                value=48.0,
+                value=cfg.get("germ_time_hrs", 48.0),
                 step=1.0,
                 help="Hours from seeding to end of germination. Part of total cycle time.",
                 key="mgs_yield_germ",
             )
+            cfg["germ_time_hrs"] = germ_time_hrs
 
         with col_ct2:
             exclude_germ = st.checkbox(
                 "Exclude germination time from cycle",
-                value=False,
+                value=cfg.get("exclude_germ", False),
                 help=(
                     "When checked, the germination period is not counted in the "
                     "productive cycle. Use this if the germination area is not "
@@ -1600,6 +1650,7 @@ class MGSAnnualizedYieldCalculator:
                 ),
                 key="mgs_yield_excl_germ",
             )
+            cfg["exclude_germ"] = exclude_germ
 
             germ_time_days_equiv = germ_time_hrs / 24.0
             if exclude_germ:
@@ -1720,4 +1771,569 @@ class MGSAnnualizedYieldCalculator:
                     f"Yield (final density) = {final_density:.2f} × "
                     f"{effective_plant_weight_kg:.4f} × {cycles_per_year:.2f} "
                     f"= **{yield_final_det:.2f} kg/m²/year**"
+                )
+
+
+class DWCDensityCalculator:
+    """
+    DWC (Deep Water Culture) density calculator.
+
+    Calculates per-stage and time-weighted average plant density for DWC systems
+    using rafts.
+
+    Input options:
+    - Raft dimensions + seeds per raft → density computed per stage
+    - Direct density (plants/m²) per stage
+
+    Transplant stages:
+    - 0 transplants → one stage (seed to harvest on the same raft)
+    - N transplants → N+1 stages (e.g. propagation + harvest)
+
+    Overall average density is the time-weighted mean across all stages.
+    Final density is the density in the last (harvest) stage.
+    """
+
+    _UNITS = ["m", "cm", "ft", "in"]
+    _SQM_TO_SQFT = 10.7639
+    _CFG_KEY = "dwc_density_cfg"
+
+    @classmethod
+    def _cfg(cls) -> dict:
+        """Return the persistent session-state config dict for this calculator."""
+        if cls._CFG_KEY not in st.session_state:
+            st.session_state[cls._CFG_KEY] = {}
+        return st.session_state[cls._CFG_KEY]
+
+    @staticmethod
+    def to_meters(value: float, unit: str) -> float:
+        if value is None:
+            return 0.0
+        unit = unit.lower()
+        if unit == "m":
+            return value
+        elif unit == "cm":
+            return value / 100.0
+        elif unit == "ft":
+            return value * 0.3048
+        elif unit == "in":
+            return value * 0.0254
+        return value
+
+    @classmethod
+    def render(cls):
+        st.subheader("DWC Density")
+
+        st.markdown(
+            """
+            This calculator estimates **plants per m²** for a
+            **Deep Water Culture (DWC)** system using rafts.
+
+            Choose how to express density (raft dimensions + seeds, or direct entry),
+            set the number of transplant stages, and enter the days spent in each stage.  
+            Results show per-stage density and an overall **time-weighted average**.
+            """
+        )
+
+        cfg = cls._cfg()
+
+        # --- Density input method ---
+        _dm_opts = ["Raft dimensions + seeds per raft", "Direct density (plants/m²)"]
+        _dm_stored = cfg.get("density_mode", _dm_opts[0])
+        density_mode = st.radio(
+            "Density input method",
+            _dm_opts,
+            index=_dm_opts.index(_dm_stored) if _dm_stored in _dm_opts else 0,
+            horizontal=True,
+            key="dwc_density_mode",
+        )
+        cfg["density_mode"] = density_mode
+
+        # --- Raft size (shown only in raft mode) ---
+        raft_area_m2 = 0.0
+        if density_mode == _dm_opts[0]:
+            st.markdown("#### Raft dimensions")
+            rc1, rc2, rc3, rc4, rc5 = st.columns([2, 1, 2, 1, 2])
+            with rc1:
+                raft_length_val = st.number_input(
+                    "Raft length",
+                    min_value=0.0,
+                    value=cfg.get("raft_length_val", 1.2),
+                    step=0.05,
+                    key="dwc_raft_length_val",
+                )
+                cfg["raft_length_val"] = raft_length_val
+            with rc2:
+                _rl_unit = cfg.get("raft_length_unit", "m")
+                raft_length_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=cls._UNITS.index(_rl_unit) if _rl_unit in cls._UNITS else 0,
+                    key="dwc_raft_length_unit",
+                )
+                cfg["raft_length_unit"] = raft_length_unit
+            with rc3:
+                raft_width_val = st.number_input(
+                    "Raft width",
+                    min_value=0.0,
+                    value=cfg.get("raft_width_val", 0.6),
+                    step=0.05,
+                    key="dwc_raft_width_val",
+                )
+                cfg["raft_width_val"] = raft_width_val
+            with rc4:
+                _rw_unit = cfg.get("raft_width_unit", "m")
+                raft_width_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=cls._UNITS.index(_rw_unit) if _rw_unit in cls._UNITS else 0,
+                    key="dwc_raft_width_unit",
+                )
+                cfg["raft_width_unit"] = raft_width_unit
+            with rc5:
+                raft_area_m2_disp = st.empty()
+
+            rl_m = cls.to_meters(raft_length_val, raft_length_unit)
+            rw_m = cls.to_meters(raft_width_val, raft_width_unit)
+            raft_area_m2 = rl_m * rw_m
+            raft_area_m2_disp.metric("Raft area (m²)", f"{raft_area_m2:.4f}")
+
+        # --- Number of transplants / stages ---
+        st.markdown("---")
+        st.markdown("#### Transplant stages")
+
+        num_transplants = st.number_input(
+            "Number of transplants",
+            min_value=0,
+            max_value=10,
+            value=cfg.get("num_transplants", 0),
+            step=1,
+            help="0 = seed directly to harvest raft (no transplant). "
+                 "Each transplant adds one intermediate stage.",
+            key="dwc_num_transplants",
+        )
+        cfg["num_transplants"] = int(num_transplants)
+        num_stages = int(num_transplants) + 1
+
+        # --- Per-stage inputs ---
+        stage_inputs = []
+        stages_cfg = cfg.setdefault("stages", [])
+        for i in range(num_stages):
+            while len(stages_cfg) <= i:
+                stages_cfg.append({})
+            sc = stages_cfg[i]
+
+            default_name = "Harvest" if i == num_stages - 1 else f"Stage {i + 1}"
+            st.markdown(f"**{default_name}**")
+
+            if density_mode == _dm_opts[0]:
+                # Raft dimensions mode: per-stage seeds per raft
+                sp1, sp2 = st.columns(2)
+                with sp1:
+                    stage_name = st.text_input(
+                        "Stage name",
+                        value=sc.get("name", default_name),
+                        key=f"dwc_stage_name_{i}",
+                    )
+                    sc["name"] = stage_name
+                with sp2:
+                    days_in_stage = st.number_input(
+                        "Days in stage",
+                        min_value=0.0,
+                        value=sc.get("days", 14.0),
+                        step=1.0,
+                        key=f"dwc_stage_days_{i}",
+                    )
+                    sc["days"] = days_in_stage
+                seeds_per_raft = st.number_input(
+                    "Seeds per raft",
+                    min_value=0.0,
+                    value=sc.get("seeds_per_raft", 24.0),
+                    step=1.0,
+                    key=f"dwc_stage_seeds_{i}",
+                )
+                sc["seeds_per_raft"] = seeds_per_raft
+                density_m2 = (seeds_per_raft / raft_area_m2) if raft_area_m2 > 0 else 0.0
+            else:
+                # Direct density mode
+                sp1, sp2, sp3 = st.columns(3)
+                with sp1:
+                    stage_name = st.text_input(
+                        "Stage name",
+                        value=sc.get("name", default_name),
+                        key=f"dwc_stage_name_{i}",
+                    )
+                    sc["name"] = stage_name
+                with sp2:
+                    days_in_stage = st.number_input(
+                        "Days in stage",
+                        min_value=0.0,
+                        value=sc.get("days", 14.0),
+                        step=1.0,
+                        key=f"dwc_stage_days_{i}",
+                    )
+                    sc["days"] = days_in_stage
+                with sp3:
+                    density_m2 = st.number_input(
+                        "Density (plants/m²)",
+                        min_value=0.0,
+                        value=sc.get("density_m2", 30.0),
+                        step=1.0,
+                        key=f"dwc_stage_density_{i}",
+                    )
+                    sc["density_m2"] = density_m2
+                seeds_per_raft = None
+
+            stage_inputs.append(
+                {
+                    "name": stage_name,
+                    "days": days_in_stage,
+                    "density_m2": density_m2,
+                    "seeds_per_raft": seeds_per_raft,
+                }
+            )
+
+        # Trim stale stage entries when the user reduces the transplant count
+        del stages_cfg[num_stages:]
+
+        st.markdown("---")
+
+        # --- Compute results ---
+        rows = []
+        total_weighted_density = 0.0
+        total_days = 0.0
+
+        for si in stage_inputs:
+            density_m2 = si["density_m2"]
+            density_sqft = density_m2 / cls._SQM_TO_SQFT
+            days = si["days"]
+
+            total_weighted_density += density_m2 * days
+            total_days += days
+
+            row = {
+                "Stage": si["name"],
+                "Days in stage": round(days, 1),
+                "Plants/m²": round(density_m2, 2),
+                "Plants/sqft": round(density_sqft, 3),
+            }
+            if si["seeds_per_raft"] is not None:
+                row["Seeds per raft"] = round(si["seeds_per_raft"], 1)
+            rows.append(row)
+
+        st.markdown("### Per-stage results")
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        if total_days > 0:
+            overall_avg_m2 = total_weighted_density / total_days
+            overall_avg_sqft = overall_avg_m2 / cls._SQM_TO_SQFT
+            final_density_m2 = stage_inputs[-1]["density_m2"] if stage_inputs else 0.0
+            final_density_sqft = final_density_m2 / cls._SQM_TO_SQFT
+
+            st.markdown("### Overall time-weighted average density")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("Average density (plants/m²)", f"{overall_avg_m2:.2f}")
+            with c2:
+                st.metric("Average density (plants/sqft)", f"{overall_avg_sqft:.3f}")
+
+            st.markdown("### Final (harvest) stage density")
+            c3, c4 = st.columns(2)
+            with c3:
+                st.metric("Final density (plants/m²)", f"{final_density_m2:.2f}")
+            with c4:
+                st.metric("Final density (plants/sqft)", f"{final_density_sqft:.3f}")
+
+            if density_mode == _dm_opts[0] and raft_area_m2 > 0:
+                with st.expander("Show raft details", expanded=False):
+                    st.write(f"Raft area: `{raft_area_m2:.4f} m²`")
+                    st.write(f"Total days across all stages: `{total_days:.1f}`")
+                    st.write(
+                        f"Time-weighted average density: `{overall_avg_m2:.2f} plants/m²`"
+                    )
+        else:
+            st.info("Enter valid days for each stage to see results.")
+
+
+class DWCAnnualizedYieldCalculator:
+    """
+    DWC (Deep Water Culture) Annualized Yield Calculator.
+
+    Calculates annualized fresh-weight yield (kg/m²/year) for a DWC raft system.
+
+    Weight can be expressed as:
+    - Raft weight (g) + plants per raft → per-plant weight
+    - Single plant weight (g)
+    - Fresh weight per m² (kg/m²) directly
+
+    Density inputs (average and/or final) combined with per-plant weight give
+    two separate annualized yield results.
+    """
+
+    _SQM_TO_SQFT = 10.7639
+    _CFG_KEY = "dwc_yield_cfg"
+
+    @classmethod
+    def _cfg(cls) -> dict:
+        """Return the persistent session-state config dict for this calculator."""
+        if cls._CFG_KEY not in st.session_state:
+            st.session_state[cls._CFG_KEY] = {}
+        return st.session_state[cls._CFG_KEY]
+
+    @classmethod
+    def render(cls):
+        st.subheader("DWC Annualized Yield")
+
+        st.markdown(
+            """
+            Estimates the **annualized fresh-weight yield** (kg · m⁻² · year⁻¹) for a
+            Deep Water Culture system.
+
+            Enter weight using any available measurement (raft weight, single plant weight,
+            or weight per m²), along with average and/or final plant density.
+
+            Two results are shown:
+            - **Average density yield** — based on the time-weighted average density.
+            - **Final density yield** — based on the harvest stage density.
+            """
+        )
+
+        cfg = cls._cfg()
+
+        # --- Weight inputs ---
+        st.markdown("#### Weight inputs")
+
+        wcol1, wcol2, wcol3 = st.columns(3)
+
+        with wcol1:
+            raft_weight_g = st.number_input(
+                "Raft weight (g)",
+                min_value=0.0,
+                value=cfg.get("raft_weight_g", 0.0),
+                step=100.0,
+                help="Total fresh weight of all plants on one raft at harvest.",
+                key="dwc_yield_raft_weight",
+            )
+            cfg["raft_weight_g"] = raft_weight_g
+            plants_per_raft = st.number_input(
+                "Plants per raft",
+                min_value=0.0,
+                value=cfg.get("plants_per_raft", 24.0),
+                step=1.0,
+                help="Number of plants on one raft (used with raft weight).",
+                key="dwc_yield_plants_per_raft",
+            )
+            cfg["plants_per_raft"] = plants_per_raft
+
+        with wcol2:
+            plant_weight_g = st.number_input(
+                "Single plant weight (g)",
+                min_value=0.0,
+                value=cfg.get("plant_weight_g", 0.0),
+                step=5.0,
+                help="Average fresh weight per plant at harvest.",
+                key="dwc_yield_plant_weight",
+            )
+            cfg["plant_weight_g"] = plant_weight_g
+
+        with wcol3:
+            weight_per_m2_kg = st.number_input(
+                "Fresh weight per m² (kg/m²)",
+                min_value=0.0,
+                value=cfg.get("weight_per_m2_kg", 0.0),
+                step=0.5,
+                help="Total fresh weight per square metre of raft area at harvest. "
+                     "Used directly — density inputs are not required.",
+                key="dwc_yield_weight_per_m2",
+            )
+            cfg["weight_per_m2_kg"] = weight_per_m2_kg
+
+        # --- Density inputs ---
+        st.markdown("#### Density inputs")
+
+        dcol1, dcol2 = st.columns(2)
+
+        with dcol1:
+            avg_density = st.number_input(
+                "Average density (plants/m²)",
+                min_value=0.0,
+                value=cfg.get("avg_density", 0.0),
+                step=5.0,
+                help="Time-weighted average density across all stages.",
+                key="dwc_yield_avg_density",
+            )
+            cfg["avg_density"] = avg_density
+
+        with dcol2:
+            final_density = st.number_input(
+                "Final density (plants/m²)",
+                min_value=0.0,
+                value=cfg.get("final_density", 0.0),
+                step=5.0,
+                help="Plant density in the final (harvest) stage.",
+                key="dwc_yield_final_density",
+            )
+            cfg["final_density"] = final_density
+
+        # --- Cycle time ---
+        st.markdown("---")
+        st.markdown("#### Cycle time")
+
+        col_ct1, col_ct2 = st.columns(2)
+
+        with col_ct1:
+            cycle_time_days = st.number_input(
+                "Total cycle time (days, seed to harvest)",
+                min_value=1.0,
+                value=cfg.get("cycle_time_days", 28.0),
+                step=1.0,
+                key="dwc_yield_cycle",
+            )
+            cfg["cycle_time_days"] = cycle_time_days
+            germ_time_hrs = st.number_input(
+                "Germination time (hrs)",
+                min_value=0.0,
+                value=cfg.get("germ_time_hrs", 48.0),
+                step=1.0,
+                help="Hours from seeding to end of germination. Part of total cycle time.",
+                key="dwc_yield_germ",
+            )
+            cfg["germ_time_hrs"] = germ_time_hrs
+
+        with col_ct2:
+            exclude_germ = st.checkbox(
+                "Exclude germination time from cycle",
+                value=cfg.get("exclude_germ", False),
+                help=(
+                    "When checked, the germination period is not counted in the "
+                    "productive cycle."
+                ),
+                key="dwc_yield_excl_germ",
+            )
+            cfg["exclude_germ"] = exclude_germ
+
+            germ_time_days_equiv = germ_time_hrs / 24.0
+            if exclude_germ:
+                effective_cycle = max(cycle_time_days - germ_time_days_equiv, 1.0)
+                st.caption(
+                    f"Effective cycle = {cycle_time_days:.0f} days – {germ_time_hrs:.0f} hrs "
+                    f"({germ_time_days_equiv:.2f} days) = **{effective_cycle:.2f} days**"
+                )
+            else:
+                effective_cycle = cycle_time_days
+                st.caption(f"Effective cycle = **{effective_cycle:.0f} days**")
+
+        # --- Determine per-plant weight ---
+        if raft_weight_g > 0 and plants_per_raft > 0:
+            effective_plant_weight_kg = (raft_weight_g / plants_per_raft) / 1000.0
+            weight_source = (
+                f"raft weight ({raft_weight_g:.0f} g) ÷ plants per raft ({plants_per_raft:.0f})"
+            )
+        elif plant_weight_g > 0:
+            effective_plant_weight_kg = plant_weight_g / 1000.0
+            weight_source = f"single plant weight ({plant_weight_g:.1f} g)"
+        else:
+            effective_plant_weight_kg = None
+            weight_source = None
+
+        # --- Results ---
+        st.markdown("---")
+        st.markdown("### Results")
+
+        if effective_cycle <= 0:
+            st.info("Enter a valid cycle time to see results.")
+            return
+
+        cycles_per_year = 365.0 / effective_cycle
+
+        results = []
+
+        if weight_per_m2_kg > 0:
+            yield_direct = weight_per_m2_kg * cycles_per_year
+            results.append(
+                (
+                    "Annualized yield (weight/m²)",
+                    f"{yield_direct:.2f} kg/m²/year",
+                    "Based on fresh weight per m² × cycles per year.",
+                )
+            )
+
+        if effective_plant_weight_kg and avg_density > 0:
+            yield_avg = avg_density * effective_plant_weight_kg * cycles_per_year
+            results.append(
+                (
+                    "Annualized yield — average density",
+                    f"{yield_avg:.2f} kg/m²/year",
+                    "Based on the time-weighted average density across all DWC stages.",
+                )
+            )
+
+        if effective_plant_weight_kg and final_density > 0:
+            yield_final = final_density * effective_plant_weight_kg * cycles_per_year
+            results.append(
+                (
+                    "Annualized yield — final density",
+                    f"{yield_final:.2f} kg/m²/year",
+                    "Based on the plant density in the final (harvest) stage.",
+                )
+            )
+
+        if not results:
+            st.info(
+                "Enter valid weight and density inputs above to see results. "
+                "Provide at least one weight input (raft weight, single plant weight, "
+                "or fresh weight per m²) and at least one density input."
+            )
+            return
+
+        if len(results) == 1:
+            st.metric(results[0][0], results[0][1], help=results[0][2])
+        elif len(results) == 2:
+            r1, r2 = st.columns(2)
+            with r1:
+                st.metric(results[0][0], results[0][1], help=results[0][2])
+            with r2:
+                st.metric(results[1][0], results[1][1], help=results[1][2])
+        else:
+            r1, r2, r3 = st.columns(3)
+            for col, item in zip([r1, r2, r3], results):
+                with col:
+                    st.metric(item[0], item[1], help=item[2])
+
+        with st.expander("Show calculation details", expanded=False):
+            if weight_source:
+                plant_wt_display = effective_plant_weight_kg * 1000
+                st.write(
+                    f"Plant fresh weight: `{plant_wt_display:.1f} g` = "
+                    f"`{effective_plant_weight_kg:.4f} kg` (from {weight_source})"
+                )
+            if weight_per_m2_kg > 0:
+                st.write(f"Fresh weight per m²: `{weight_per_m2_kg:.3f} kg/m²`")
+            st.write(f"Total cycle time: `{cycle_time_days:.0f} days`")
+            st.write(
+                f"Germination time: `{germ_time_hrs:.0f} hrs` = `{germ_time_days_equiv:.2f} days`"
+            )
+            st.write(
+                f"Germination excluded from cycle: `{'Yes' if exclude_germ else 'No'}`"
+            )
+            st.write(f"Effective cycle time: `{effective_cycle:.2f} days`")
+            st.write(f"Cycles per year: `{cycles_per_year:.2f}`")
+            if avg_density > 0 and effective_plant_weight_kg:
+                st.markdown("---")
+                st.write(f"Average density: `{avg_density:.2f} plants/m²`")
+                y = avg_density * effective_plant_weight_kg * cycles_per_year
+                st.write(
+                    f"Yield (avg density) = {avg_density:.2f} × "
+                    f"{effective_plant_weight_kg:.4f} × {cycles_per_year:.2f} "
+                    f"= **{y:.2f} kg/m²/year**"
+                )
+            if final_density > 0 and effective_plant_weight_kg:
+                st.markdown("---")
+                st.write(f"Final density: `{final_density:.2f} plants/m²`")
+                y = final_density * effective_plant_weight_kg * cycles_per_year
+                st.write(
+                    f"Yield (final density) = {final_density:.2f} × "
+                    f"{effective_plant_weight_kg:.4f} × {cycles_per_year:.2f} "
+                    f"= **{y:.2f} kg/m²/year**"
                 )

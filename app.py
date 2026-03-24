@@ -369,9 +369,11 @@ def render_mgs_tools():
 
 def render_dwc_tools():
     st.markdown("## DWC tools")
-    tabs = st.tabs(["DWC Tools"])
+    tabs = st.tabs(["Density Calculator", "Annualized Yield"])
     with tabs[0]:
-        st.info("DWC tools are coming soon. Stay tuned!")
+        calculators.DWCDensityCalculator.render()
+    with tabs[1]:
+        calculators.DWCAnnualizedYieldCalculator.render()
 
 
 # -----------------------
