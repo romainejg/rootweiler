@@ -196,11 +196,17 @@ class HumidityDeficitCalculator:
     def interpret_hd_lettuce(hd: float) -> str:
         """Return a brief interpretation of HD for lettuce cultivation."""
         if hd < 3:
-            return "Too Humid – risk of tip burn and disease; increase ventilation."
+            return (
+                "Too Humid – transpiration strongly reduced; increased risk of "
+                "glassiness (watersoaking of leaf tissue) and disease. Increase ventilation."
+            )
         elif hd <= 7:
             return "Optimal – ideal range for lettuce growth."
         else:
-            return "Too Dry – excessive transpiration stress; raise humidity."
+            return (
+                "Too Dry – excessive transpiration; increased risk of tipburn "
+                "due to rapid water loss from leaf edges. Raise humidity."
+            )
 
     @classmethod
     def render(cls):
@@ -288,6 +294,27 @@ class VPDHDCalculator:
               crop transpiration.
             - **HD** (g/m³) — the amount of water vapour the air can still absorb
               before saturation; directly linked to lettuce transpiration rates.
+            """
+        )
+
+        st.markdown(
+            """
+            **Reference ranges for lettuce:**
+
+            | Period | Target HD (g/m³) | Target VPD (kPa) | Notes |
+            |--------|-----------------|-----------------|-------|
+            | ☀️ Day  | 3 – 7           | 0.8 – 1.2        | Active transpiration, optimal growth |
+            | 🌙 Night | 1 – 3          | 0.3 – 0.8        | Reduced transpiration, lower disease risk |
+
+            - **Low values** (HD < 3 / VPD < 0.3 kPa): air is near saturation — high risk of
+              **glassiness** (watersoaking of leaf tissue) and fungal disease.
+            - **High values** (HD > 7 / VPD > 1.2 kPa): air is very dry — high risk of
+              **tipburn** from rapid water loss at leaf edges.
+
+            > ⚠️ **Measure humidity at canopy level.** The microclimate directly around the
+            > plant canopy can be significantly more humid (approaching >99% RH) than the ambient air
+            > due to leaf transpiration and limited airflow between leaves. Always use a sensor
+            > positioned at canopy height for accurate readings.
             """
         )
 
