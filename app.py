@@ -332,7 +332,9 @@ def render_home():
 
 def render_dli_calculator():
     st.markdown("## DLI Calculator")
-    calculators.DLICalculator.render()
+    tabs = st.tabs(["DLI Calculator"])
+    with tabs[0]:
+        calculators.DLICalculator.render()
 
 
 # -----------------------
@@ -342,13 +344,10 @@ def render_dli_calculator():
 def render_vpd_hd_calculator():
     st.markdown("## VPD/HD Calculator")
 
-    tabs = st.tabs(["Vapor Pressure Deficit (VPD)", "Humidity Deficit (HD)"])
+    tabs = st.tabs(["VPD & HD Calculator"])
 
     with tabs[0]:
-        calculators.VPDCalculator.render()
-
-    with tabs[1]:
-        calculators.HumidityDeficitCalculator.render()
+        calculators.VPDHDCalculator.render()
 
 
 # -----------------------
@@ -357,7 +356,11 @@ def render_vpd_hd_calculator():
 
 def render_mgs_tools():
     st.markdown("## MGS tools")
-    calculators.MGSLettuceCalculator.render()
+    tabs = st.tabs(["Density Calculator", "Annualized Yield"])
+    with tabs[0]:
+        calculators.MGSLettuceCalculator.render()
+    with tabs[1]:
+        calculators.MGSAnnualizedYieldCalculator.render()
 
 
 # -----------------------
@@ -366,7 +369,9 @@ def render_mgs_tools():
 
 def render_dwc_tools():
     st.markdown("## DWC tools")
-    st.info("DWC tools are coming soon. Stay tuned!")
+    tabs = st.tabs(["DWC Tools"])
+    with tabs[0]:
+        st.info("DWC tools are coming soon. Stay tuned!")
 
 
 # -----------------------
@@ -374,7 +379,10 @@ def render_dwc_tools():
 # -----------------------
 
 def render_nutrient_tools():
-    NutrientToolsUI.render()
+    st.markdown("## Nutrient tools")
+    tabs = st.tabs(["Leaf tissue (lettuce)"])
+    with tabs[0]:
+        NutrientToolsUI.render()
 
 
 # -----------------------
@@ -383,7 +391,9 @@ def render_nutrient_tools():
 
 def render_climate_analyzer():
     st.markdown("## Climate Analyzer")
-    climate_analyzer.ClimateAnalyzerUI.render()
+    tabs = st.tabs(["Climate Analyzer"])
+    with tabs[0]:
+        climate_analyzer.ClimateAnalyzerUI.render()
 
 
 # -----------------------
@@ -392,7 +402,9 @@ def render_climate_analyzer():
 
 def render_unit_converter():
     st.markdown("## Unit Converter")
-    calculators.UnitConverterCalculator.render()
+    tabs = st.tabs(["Unit Converter"])
+    with tabs[0]:
+        calculators.UnitConverterCalculator.render()
 
 
 # -----------------------
@@ -400,6 +412,7 @@ def render_unit_converter():
 # -----------------------
 
 def render_pdf_imaging():
+    st.markdown("## PDF and Imaging")
     ImagingToolsUI.render()
 
 

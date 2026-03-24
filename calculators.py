@@ -27,23 +27,45 @@ class DLICalculator:
             DLI describes the total amount of photosynthetically active light a crop
             receives over a day, in **mol·m⁻²·day⁻¹**.
 
-            This calculator uses:
-
-            - **PPFD** in µmol·m⁻²·s⁻¹  
-            - **Photoperiod** in hours per day  
+            This calculator accepts light input as either **PPFD** (µmol·m⁻²·s⁻¹) or
+            **PAR** (W·m⁻²). PAR in W·m⁻² is converted to PPFD using the standard
+            approximation: *PPFD ≈ PAR × 4.57*.
             """
         )
+
+        col_mode, _ = st.columns([1, 2])
+        with col_mode:
+            light_input_mode = st.radio(
+                "Light input type",
+                ["PPFD (µmol·m⁻²·s⁻¹)", "PAR (W·m⁻²)"],
+                index=0,
+                horizontal=True,
+                key="dli_light_mode",
+            )
 
         col1, col2 = st.columns(2)
 
         with col1:
-            ppfd = st.number_input(
-                "Average PPFD (µmol·m⁻²·s⁻¹)",
-                min_value=0.0,
-                max_value=5000.0,
-                value=200.0,
-                step=10.0,
-            )
+            if light_input_mode == "PPFD (µmol·m⁻²·s⁻¹)":
+                light_value = st.number_input(
+                    "Average PPFD (µmol·m⁻²·s⁻¹)",
+                    min_value=0.0,
+                    max_value=5000.0,
+                    value=200.0,
+                    step=10.0,
+                    key="dli_ppfd",
+                )
+                ppfd = light_value
+            else:
+                light_value = st.number_input(
+                    "Average PAR (W·m⁻²)",
+                    min_value=0.0,
+                    max_value=1200.0,
+                    value=44.0,
+                    step=1.0,
+                    key="dli_par",
+                )
+                ppfd = light_value * 4.57  # PAR (W/m²) → PPFD (µmol/m²/s)
 
         with col2:
             hours = st.number_input(
@@ -52,14 +74,17 @@ class DLICalculator:
                 max_value=24.0,
                 value=16.0,
                 step=0.5,
+                key="dli_hours",
             )
 
         if ppfd > 0 and hours > 0:
             dli = cls.compute_dli(ppfd, hours)
             st.markdown("### Result")
+            if light_input_mode == "PAR (W·m⁻²)":
+                st.write(f"Converted PPFD: **{ppfd:.1f} µmol·m⁻²·s⁻¹**")
             st.write(f"**DLI: {dli:.2f} mol·m⁻²·day⁻¹**")
         else:
-            st.info("Enter PPFD and photoperiod above zero to see the DLI.")
+            st.info("Enter a light value and photoperiod above zero to see the DLI.")
 
 
 class VPDCalculator:
@@ -245,6 +270,86 @@ class HumidityDeficitCalculator:
             st.markdown(f"**Lettuce interpretation:** {interpretation}")
         else:
             st.info("Set relative humidity between 0 and 100% to calculate HD.")
+
+
+class VPDHDCalculator:
+    """Combined Vapor Pressure Deficit + Humidity Deficit calculator."""
+
+    @classmethod
+    def render(cls):
+        st.subheader("VPD & HD Calculator")
+
+        st.markdown(
+            """
+            Both **Vapor Pressure Deficit (VPD)** and **Humidity Deficit (HD)** are
+            calculated from the same two inputs: air temperature and relative humidity.
+
+            - **VPD** (kPa) — describes the drying power of the air; key driver of
+              crop transpiration.
+            - **HD** (g/m³) — the amount of water vapour the air can still absorb
+              before saturation; directly linked to lettuce transpiration rates.
+            """
+        )
+
+        col1, col2, col3 = st.columns([1, 1, 1])
+
+        with col1:
+            temp_unit = st.radio(
+                "Temperature unit",
+                ["°C", "°F"],
+                index=0,
+                horizontal=True,
+                key="vpdhd_temp_unit",
+            )
+
+        with col2:
+            temp_input = st.number_input(
+                f"Air temperature ({temp_unit})",
+                value=23.0,
+                step=0.5,
+                key="vpdhd_temp_input",
+            )
+
+        with col3:
+            rh = st.number_input(
+                "Relative Humidity (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=70.0,
+                step=1.0,
+                key="vpdhd_rh",
+            )
+
+        if temp_unit == "°F":
+            temp_c = (temp_input - 32.0) * 5.0 / 9.0
+        else:
+            temp_c = temp_input
+
+        if 0 <= rh <= 100:
+            vpd = VPDCalculator.compute_vpd_kpa(temp_c, rh)
+            hd = HumidityDeficitCalculator.compute_hd(temp_c, rh)
+            ahs = HumidityDeficitCalculator.compute_saturation_absolute_humidity(temp_c)
+            hd_interp = HumidityDeficitCalculator.interpret_hd_lettuce(hd)
+
+            st.markdown("### Results")
+            res_col1, res_col2 = st.columns(2)
+
+            with res_col1:
+                st.metric("Vapor Pressure Deficit (VPD)", f"{vpd:.2f} kPa")
+
+            with res_col2:
+                st.metric("Humidity Deficit (HD)", f"{hd:.2f} g/m³")
+
+            st.markdown(f"**Lettuce HD interpretation:** {hd_interp}")
+
+            with st.expander("Show intermediate values", expanded=False):
+                st.write(f"Temperature (°C): `{temp_c:.2f}`")
+                st.write(f"Relative Humidity: `{rh:.1f}%`")
+                st.write(f"Saturation Absolute Humidity (AHs): `{ahs:.2f} g/m³`")
+                es = 0.6108 * np.exp((17.27 * temp_c) / (temp_c + 237.3))
+                st.write(f"Saturation Vapour Pressure (es): `{es:.4f} kPa`")
+        else:
+            st.info("Set relative humidity between 0 and 100% to calculate VPD and HD.")
 
 
 class GutterPlantDensityCalculator:
@@ -1336,3 +1441,300 @@ class MGSLettuceCalculator:
                 st.write(f"Total area across all zones (m²): `{total_area_all:.3f}`")
         else:
             st.info("Enter valid zone lengths and spacings to see results.")
+
+
+class MGSAnnualizedYieldCalculator:
+    """
+    MGS Annualized Yield Calculator.
+
+    Calculates annualized fresh-weight yield (kg/m²/year) for a Mobile Gutter
+    System using either gutter-level inputs or direct density / plant-weight inputs.
+
+    Two results are shown:
+    - Yield using **average density** (plants/m² weighted across all zones)
+    - Yield using **final density** (plants/m² at the final/harvest zone)
+
+    Cycle time and optional germination time are used to compute cycles per year.
+    """
+
+    _UNITS = ["m", "cm", "ft", "in"]
+    _SQM_TO_SQFT = 10.7639
+
+    @staticmethod
+    def to_meters(value: float, unit: str) -> float:
+        if value is None:
+            return 0.0
+        unit = unit.lower()
+        if unit == "m":
+            return value
+        elif unit == "cm":
+            return value / 100.0
+        elif unit == "ft":
+            return value * 0.3048
+        elif unit == "in":
+            return value * 0.0254
+        return value
+
+    @staticmethod
+    def density_from_gutter(
+        gutter_length_m: float,
+        gutter_width_m: float,
+        spacing_m: float,
+        plants_per_gutter: float,
+    ) -> float:
+        """Plants/m² from gutter geometry."""
+        pitch = gutter_width_m + spacing_m
+        if pitch <= 0 or gutter_length_m <= 0 or plants_per_gutter <= 0:
+            return 0.0
+        return plants_per_gutter / (gutter_length_m * pitch)
+
+    @classmethod
+    def render(cls):
+        st.subheader("MGS Annualized Yield")
+
+        st.markdown(
+            """
+            Estimates the **annualized fresh-weight yield** (kg · m⁻² · year⁻¹) for a
+            Mobile Gutter System.
+
+            Two results are shown:
+            - **Average density yield** — based on the weighted plant density across all zones
+              (from propagation to harvest). Reflects true floor-area productivity.
+            - **Final density yield** — based on the plant density at the final (harvest) zone.
+              Useful for comparing to a fixed-spacing system.
+            """
+        )
+
+        # --- Input mode ---
+        input_mode = st.radio(
+            "Input mode",
+            ["Gutter values", "Single plant values"],
+            index=0,
+            horizontal=True,
+            key="mgs_yield_input_mode",
+        )
+
+        st.markdown("---")
+
+        if input_mode == "Gutter values":
+            st.markdown("#### Gutter system inputs")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                gl_val = st.number_input(
+                    "Gutter length",
+                    min_value=0.0,
+                    value=2.0,
+                    step=0.1,
+                    key="mgs_yield_gl_val",
+                )
+                gl_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=0,
+                    key="mgs_yield_gl_unit",
+                )
+
+                gw_val = st.number_input(
+                    "Gutter width",
+                    min_value=0.0,
+                    value=16.0,
+                    step=1.0,
+                    key="mgs_yield_gw_val",
+                )
+                gw_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=1,  # default cm
+                    key="mgs_yield_gw_unit",
+                )
+
+                plants_per_gutter = st.number_input(
+                    "Plants per gutter",
+                    min_value=1.0,
+                    value=22.0,
+                    step=1.0,
+                    key="mgs_yield_ppg",
+                )
+
+            with col2:
+                avg_spacing_val = st.number_input(
+                    "Average zone spacing (gap between gutters)",
+                    min_value=0.0,
+                    value=5.0,
+                    step=0.5,
+                    help="Weighted average spacing across all zones (propagation → harvest).",
+                    key="mgs_yield_avg_spacing_val",
+                )
+                avg_spacing_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=1,  # default cm
+                    key="mgs_yield_avg_spacing_unit",
+                )
+
+                final_spacing_val = st.number_input(
+                    "Final zone spacing (harvest zone)",
+                    min_value=0.0,
+                    value=20.0,
+                    step=1.0,
+                    help="Gutter-to-gutter gap in the final (harvest) zone.",
+                    key="mgs_yield_final_spacing_val",
+                )
+                final_spacing_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=1,  # default cm
+                    key="mgs_yield_final_spacing_unit",
+                )
+
+                weight_per_gutter_g = st.number_input(
+                    "Average fresh weight per gutter (g)",
+                    min_value=0.0,
+                    value=1100.0,
+                    step=50.0,
+                    help="Total fresh weight of all plants in one gutter at harvest.",
+                    key="mgs_yield_wpg",
+                )
+
+            # Compute from gutter inputs
+            gl_m = cls.to_meters(gl_val, gl_unit)
+            gw_m = cls.to_meters(gw_val, gw_unit)
+            avg_sp_m = cls.to_meters(avg_spacing_val, avg_spacing_unit)
+            final_sp_m = cls.to_meters(final_spacing_val, final_spacing_unit)
+
+            avg_density = cls.density_from_gutter(gl_m, gw_m, avg_sp_m, plants_per_gutter)
+            final_density = cls.density_from_gutter(gl_m, gw_m, final_sp_m, plants_per_gutter)
+            plant_weight_g = weight_per_gutter_g / plants_per_gutter if plants_per_gutter > 0 else 0.0
+
+        else:
+            # Single plant values mode
+            st.markdown("#### Density & weight inputs")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                avg_density = st.number_input(
+                    "Average density (plants/m²)",
+                    min_value=0.0,
+                    value=300.0,
+                    step=10.0,
+                    help="Weighted average density across all zones.",
+                    key="mgs_yield_avg_density",
+                )
+                final_density = st.number_input(
+                    "Final density (plants/m²)",
+                    min_value=0.0,
+                    value=60.0,
+                    step=5.0,
+                    help="Plant density in the final harvest zone.",
+                    key="mgs_yield_final_density",
+                )
+
+            with col2:
+                plant_weight_g = st.number_input(
+                    "Average fresh weight per plant (g)",
+                    min_value=0.0,
+                    value=50.0,
+                    step=5.0,
+                    key="mgs_yield_pw",
+                )
+
+        # --- Cycle time inputs (common to both modes) ---
+        st.markdown("---")
+        st.markdown("#### Cycle time")
+
+        col_ct1, col_ct2 = st.columns(2)
+
+        with col_ct1:
+            cycle_time_days = st.number_input(
+                "Total cycle time (days, seed to harvest)",
+                min_value=1.0,
+                value=35.0,
+                step=1.0,
+                key="mgs_yield_cycle",
+            )
+            germ_time_days = st.number_input(
+                "Germination time (days)",
+                min_value=0.0,
+                value=5.0,
+                step=1.0,
+                help="Days from seeding to transplant / end of germination. "
+                     "Part of total cycle time.",
+                key="mgs_yield_germ",
+            )
+
+        with col_ct2:
+            exclude_germ = st.checkbox(
+                "Exclude germination time from cycle",
+                value=False,
+                help=(
+                    "When checked, the germination period is not counted in the "
+                    "productive cycle. Use this if the germination area is not "
+                    "part of the MGS floor space being measured."
+                ),
+                key="mgs_yield_excl_germ",
+            )
+
+            if exclude_germ:
+                effective_cycle = max(cycle_time_days - germ_time_days, 1.0)
+                st.caption(
+                    f"Effective cycle = {cycle_time_days:.0f} – {germ_time_days:.0f} "
+                    f"= **{effective_cycle:.0f} days**"
+                )
+            else:
+                effective_cycle = cycle_time_days
+                st.caption(f"Effective cycle = **{effective_cycle:.0f} days**")
+
+        # --- Results ---
+        st.markdown("---")
+        st.markdown("### Results")
+
+        if avg_density <= 0 or final_density <= 0 or plant_weight_g <= 0 or effective_cycle <= 0:
+            st.info(
+                "Enter valid densities, plant weight, and cycle time above to see results."
+            )
+            return
+
+        cycles_per_year = 365.0 / effective_cycle
+        plant_weight_kg = plant_weight_g / 1000.0
+
+        yield_avg = avg_density * plant_weight_kg * cycles_per_year
+        yield_final = final_density * plant_weight_kg * cycles_per_year
+
+        res1, res2 = st.columns(2)
+        with res1:
+            st.metric(
+                "Annualized yield — average density",
+                f"{yield_avg:.2f} kg/m²/year",
+                help="Based on the weighted average density across all MGS zones.",
+            )
+        with res2:
+            st.metric(
+                "Annualized yield — final density",
+                f"{yield_final:.2f} kg/m²/year",
+                help="Based on the plant density in the final (harvest) zone.",
+            )
+
+        with st.expander("Show calculation details", expanded=False):
+            st.write(f"Plant fresh weight: `{plant_weight_g:.1f} g` = `{plant_weight_kg:.4f} kg`")
+            st.write(f"Total cycle time: `{cycle_time_days:.0f} days`")
+            st.write(f"Germination time: `{germ_time_days:.0f} days`")
+            st.write(
+                f"Germination excluded from cycle: `{'Yes' if exclude_germ else 'No'}`"
+            )
+            st.write(f"Effective cycle time: `{effective_cycle:.0f} days`")
+            st.write(f"Cycles per year: `{cycles_per_year:.2f}`")
+            st.markdown("---")
+            st.write(f"Average density: `{avg_density:.2f} plants/m²`")
+            st.write(
+                f"Yield (avg density) = {avg_density:.2f} × {plant_weight_kg:.4f} × {cycles_per_year:.2f} "
+                f"= **{yield_avg:.2f} kg/m²/year**"
+            )
+            st.markdown("---")
+            st.write(f"Final density: `{final_density:.2f} plants/m²`")
+            st.write(
+                f"Yield (final density) = {final_density:.2f} × {plant_weight_kg:.4f} × {cycles_per_year:.2f} "
+                f"= **{yield_final:.2f} kg/m²/year**"
+            )

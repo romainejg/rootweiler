@@ -219,32 +219,7 @@ class NutrientToolsUI:
 
     @classmethod
     def render(cls):
-        st.subheader("Nutrient tools")
-
-        tabs = st.tabs(
-            [
-                "EC / ppm mixer",
-                "Lettuce N–P–K ratio",
-                "Water quality",
-                "Leaf tissue (lettuce)",
-                "Stock recipe converter",
-            ]
-        )
-
-        with tabs[0]:
-            cls._tab_ec_ppm_mixer()
-
-        with tabs[1]:
-            cls._tab_lettuce_npk()
-
-        with tabs[2]:
-            cls._tab_water_quality()
-
-        with tabs[3]:
-            cls._tab_leaf_tissue()
-
-        with tabs[4]:
-            cls._tab_stock_converter()
+        cls._tab_leaf_tissue()
 
     # ------------------ Tab 1: EC / ppm mixer ------------------ #
 
