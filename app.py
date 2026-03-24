@@ -12,10 +12,8 @@ import base64
 import cv2
 import climate_analyzer
 import calculators
-from box_plot_tools import BoxPlotUI
 from imaging_tools import ImagingToolsUI
 from nutrient_tools import NutrientToolsUI
-from phenotyping_tools import PhenotypingUI
 
 
 # -----------------------
@@ -251,13 +249,14 @@ def sidebar_nav():
             "Sections",
             [
                 "Home",
-                "Calculators",
-                "MGS",
-                "Climate",
-                "Phenotyping",
-                "Nutrients",
-                "Data & Graphs",
-                "Imaging",
+                "DLI Calculator",
+                "VPD/HD Calculator",
+                "MGS tools",
+                "DWC tools",
+                "Nutrient tools",
+                "Climate Analyzer",
+                "Unit Converter",
+                "PDF and Imaging",
             ],
             index=0,
         )
@@ -328,67 +327,80 @@ def render_home():
 
 
 # -----------------------
-# Section: Calculators (concept placeholder)
+# Section: DLI Calculator
 # -----------------------
 
-def render_calculators():
-    st.markdown("## Calculators")
+def render_dli_calculator():
+    st.markdown("## DLI Calculator")
+    calculators.DLICalculator.render()
 
-    tabs = st.tabs(
-        [
-            "Daily Light Integral (DLI)",
-            "Vapor Pressure Deficit (VPD)",
-            "Humidity Deficit (HD)",
-            "Plants per m²",
-            "Unit Converter",
-        ]
-    )
+
+# -----------------------
+# Section: VPD/HD Calculator
+# -----------------------
+
+def render_vpd_hd_calculator():
+    st.markdown("## VPD/HD Calculator")
+
+    tabs = st.tabs(["Vapor Pressure Deficit (VPD)", "Humidity Deficit (HD)"])
 
     with tabs[0]:
-        calculators.DLICalculator.render()
-
-    with tabs[1]:
         calculators.VPDCalculator.render()
 
-    with tabs[2]:
+    with tabs[1]:
         calculators.HumidityDeficitCalculator.render()
 
-    with tabs[3]:
-        calculators.GutterPlantDensityCalculator.render()
 
-    with tabs[4]:
-        calculators.UnitConverterCalculator.render()
+# -----------------------
+# Section: MGS tools
+# -----------------------
 
+def render_mgs_tools():
+    st.markdown("## MGS tools")
+    calculators.MGSLettuceCalculator.render()
 
 
 # -----------------------
-# Section: MGS
+# Section: DWC tools
 # -----------------------
 
-def render_mgs():
-    st.markdown("## MGS")
-
-    tabs = st.tabs(["MGS Lettuce Density"])
-
-    with tabs[0]:
-        calculators.MGSLettuceCalculator.render()
+def render_dwc_tools():
+    st.markdown("## DWC tools")
+    st.info("DWC tools are coming soon. Stay tuned!")
 
 
 # -----------------------
-# Section: Climate (concept placeholder)
+# Section: Nutrient tools
 # -----------------------
 
-def render_climate():
-    st.markdown("## Climate")
+def render_nutrient_tools():
+    NutrientToolsUI.render()
 
-    tabs = st.tabs(["Climate Analyzer", "Canopy Closure*"])
 
-    with tabs[0]:
-        climate_analyzer.ClimateAnalyzerUI.render()
+# -----------------------
+# Section: Climate Analyzer
+# -----------------------
 
-    with tabs[1]:
-        st.markdown("**\\* Under construction**")
-        calculators.CanopyClosureCalculator.render()
+def render_climate_analyzer():
+    st.markdown("## Climate Analyzer")
+    climate_analyzer.ClimateAnalyzerUI.render()
+
+
+# -----------------------
+# Section: Unit Converter
+# -----------------------
+
+def render_unit_converter():
+    st.markdown("## Unit Converter")
+    calculators.UnitConverterCalculator.render()
+
+
+# -----------------------
+# Section: PDF and Imaging
+# -----------------------
+
+def render_pdf_imaging():
+    ImagingToolsUI.render()
 
 
 # -----------------------
@@ -403,21 +415,22 @@ def main():
 
     if section == "Home":
         render_home()
-    elif section == "Calculators":
-        render_calculators()
-    elif section == "MGS":
-        render_mgs()
-    elif section == "Climate":
-        render_climate()
-    elif section == "Phenotyping":
-        PhenotypingUI.render()
-    elif section == "Nutrients":
-        NutrientToolsUI.render()
-    elif section == "Data & Graphs":
-        BoxPlotUI.render()
-    elif section == "Imaging":
-        ImagingToolsUI.render()
-
+    elif section == "DLI Calculator":
+        render_dli_calculator()
+    elif section == "VPD/HD Calculator":
+        render_vpd_hd_calculator()
+    elif section == "MGS tools":
+        render_mgs_tools()
+    elif section == "DWC tools":
+        render_dwc_tools()
+    elif section == "Nutrient tools":
+        render_nutrient_tools()
+    elif section == "Climate Analyzer":
+        render_climate_analyzer()
+    elif section == "Unit Converter":
+        render_unit_converter()
+    elif section == "PDF and Imaging":
+        render_pdf_imaging()
     else:
         render_home()
 
