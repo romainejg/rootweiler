@@ -356,11 +356,13 @@ def render_vpd_hd_calculator():
 
 def render_mgs_tools():
     st.markdown("## MGS tools")
-    tabs = st.tabs(["Density Calculator", "Annualized Yield"])
+    tabs = st.tabs(["Density Calculator", "Annualized Yield", "Variety Seed Calculator"])
     with tabs[0]:
         calculators.MGSLettuceCalculator.render()
     with tabs[1]:
         calculators.MGSAnnualizedYieldCalculator.render()
+    with tabs[2]:
+        calculators.MGSVarietySeedCalculator.render()
 
 
 # -----------------------
