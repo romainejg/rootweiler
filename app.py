@@ -252,6 +252,7 @@ def sidebar_nav():
             [
                 "Home",
                 "Calculators",
+                "MGS",
                 "Climate",
                 "Phenotyping",
                 "Nutrients",
@@ -361,6 +362,19 @@ def render_calculators():
 
 
 # -----------------------
+# Section: MGS
+# -----------------------
+
+def render_mgs():
+    st.markdown("## MGS")
+
+    tabs = st.tabs(["MGS Lettuce Density"])
+
+    with tabs[0]:
+        calculators.MGSLettuceCalculator.render()
+
+
+# -----------------------
 # Section: Climate (concept placeholder)
 # -----------------------
 
@@ -391,6 +405,8 @@ def main():
         render_home()
     elif section == "Calculators":
         render_calculators()
+    elif section == "MGS":
+        render_mgs()
     elif section == "Climate":
         render_climate()
     elif section == "Phenotyping":

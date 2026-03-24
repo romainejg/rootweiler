@@ -1026,3 +1026,313 @@ class UnitConverterCalculator:
         if result is not None:
             st.markdown("### Result")
             st.write(f"**{value} {from_unit} = {result:.4g} {to_unit}**")
+
+
+class MGSLettuceCalculator:
+    """
+    MGS (Mobile Gutter System) lettuce density calculator.
+
+    Calculates per-zone and overall average seeds/plants per m² for MGS systems.
+
+    Fixed system inputs (entered once):
+    - Gutter length  (m, cm, ft, or in)
+    - Gutter width   (m, cm, ft, or in)
+    - Seeds per gutter
+
+    Per-zone inputs (repeated for each zone):
+    - Zone name / label
+    - Zone length    (m, cm, ft, or in)
+    - Zone spacing   (gap between gutters, m, cm, ft, or in)
+
+    Formulae:
+    - Footprint area per gutter = gutter_length × (gutter_width + zone_spacing)
+    - Seeds per m² (per zone)   = seeds_per_gutter / footprint_area_per_gutter
+    - Gutters per zone          = zone_length / (gutter_width + zone_spacing)
+    - Total seeds per zone      = seeds_per_gutter × gutters_per_zone
+    - Zone area                 = gutter_length × zone_length
+    - Overall avg seeds/m²      = Σ(total_seeds) / Σ(zone_area)
+    """
+
+    _UNITS = ["m", "cm", "ft", "in"]
+    _SQM_TO_SQFT = 10.7639  # 1 m² = 10.7639 ft²
+
+    @staticmethod
+    def to_meters(value: float, unit: str) -> float:
+        """Convert a length value to metres."""
+        if value is None:
+            return 0.0
+        unit = unit.lower()
+        if unit == "m":
+            return value
+        elif unit == "cm":
+            return value / 100.0
+        elif unit == "ft":
+            return value * 0.3048
+        elif unit == "in":
+            return value * 0.0254
+        return value  # fallback: treat as metres
+
+    @staticmethod
+    def compute_seeds_per_m2(
+        gutter_length_m: float,
+        gutter_width_m: float,
+        spacing_m: float,
+        seeds_per_gutter: float,
+    ) -> float:
+        """
+        Compute seeds/m² from gutter geometry and seeding rate.
+
+        footprint_area = gutter_length × (gutter_width + spacing)
+        seeds_per_m²   = seeds_per_gutter / footprint_area
+        """
+        if gutter_length_m <= 0 or seeds_per_gutter <= 0:
+            return 0.0
+        pitch_m = gutter_width_m + spacing_m
+        if pitch_m <= 0:
+            return 0.0
+        area_m2 = gutter_length_m * pitch_m
+        if area_m2 <= 0:
+            return 0.0
+        return seeds_per_gutter / area_m2
+
+    @classmethod
+    def compute_zone_stats(
+        cls,
+        gutter_length_m: float,
+        gutter_width_m: float,
+        seeds_per_gutter: float,
+        zone_length_m: float,
+        zone_spacing_m: float,
+    ) -> dict:
+        """
+        Compute statistics for a single zone.
+
+        Returns a dict with keys:
+        - gutters_in_zone  (float)
+        - total_seeds      (float)
+        - zone_area_m2     (float)
+        - seeds_per_m2     (float)
+        - seeds_per_sqft   (float)
+        """
+        pitch_m = gutter_width_m + zone_spacing_m
+        if pitch_m <= 0 or gutter_length_m <= 0 or zone_length_m <= 0:
+            return {
+                "gutters_in_zone": 0.0,
+                "total_seeds": 0.0,
+                "zone_area_m2": 0.0,
+                "seeds_per_m2": 0.0,
+                "seeds_per_sqft": 0.0,
+            }
+
+        gutters_in_zone = zone_length_m / pitch_m
+        total_seeds = seeds_per_gutter * gutters_in_zone
+        zone_area_m2 = gutter_length_m * zone_length_m
+        seeds_per_m2 = total_seeds / zone_area_m2 if zone_area_m2 > 0 else 0.0
+        seeds_per_sqft = seeds_per_m2 / cls._SQM_TO_SQFT
+
+        return {
+            "gutters_in_zone": gutters_in_zone,
+            "total_seeds": total_seeds,
+            "zone_area_m2": zone_area_m2,
+            "seeds_per_m2": seeds_per_m2,
+            "seeds_per_sqft": seeds_per_sqft,
+        }
+
+    @classmethod
+    def render(cls):
+        st.subheader("MGS Lettuce Density")
+
+        st.markdown(
+            """
+            This calculator estimates **seeds (plants) per m²** for a
+            **Mobile Gutter System (MGS)** lettuce setup.
+
+            Enter the fixed system dimensions once, then configure each zone
+            with its own length and gutter-to-gutter spacing.  
+            Results show per-zone density and an overall weighted average.
+            """
+        )
+
+        st.markdown("#### System inputs")
+
+        col1, col2, col3 = st.columns([2, 1, 2])
+
+        with col1:
+            gutter_length_val = st.number_input(
+                "Gutter length",
+                min_value=0.0,
+                value=2.0,
+                step=0.1,
+                key="mgs_gutter_length_val",
+            )
+        with col2:
+            gutter_length_unit = st.selectbox(
+                "Unit",
+                cls._UNITS,
+                index=0,
+                key="mgs_gutter_length_unit",
+            )
+        with col3:
+            seeds_per_gutter = st.number_input(
+                "Seeds per gutter",
+                min_value=0.0,
+                value=22.0,
+                step=1.0,
+                key="mgs_seeds_per_gutter",
+            )
+
+        col4, col5 = st.columns([2, 1])
+        with col4:
+            gutter_width_val = st.number_input(
+                "Gutter width",
+                min_value=0.0,
+                value=16.0,
+                step=1.0,
+                key="mgs_gutter_width_val",
+            )
+        with col5:
+            gutter_width_unit = st.selectbox(
+                "Unit",
+                cls._UNITS,
+                index=1,  # default: cm
+                key="mgs_gutter_width_unit",
+            )
+
+        st.markdown("---")
+        st.markdown("#### Zone configuration")
+
+        num_zones = st.number_input(
+            "Number of zones",
+            min_value=1,
+            max_value=20,
+            value=2,
+            step=1,
+            key="mgs_num_zones",
+        )
+
+        # Collect per-zone inputs
+        zone_inputs = []
+        for i in range(int(num_zones)):
+            st.markdown(f"**Zone {i + 1}**")
+            zc1, zc2, zc3, zc4, zc5 = st.columns([2, 2, 1, 2, 1])
+            with zc1:
+                zone_name = st.text_input(
+                    "Zone name",
+                    value=f"Zone {i + 1}",
+                    key=f"mgs_zone_name_{i}",
+                )
+            with zc2:
+                zone_length_val = st.number_input(
+                    "Zone length",
+                    min_value=0.0,
+                    value=10.0,
+                    step=0.5,
+                    key=f"mgs_zone_length_val_{i}",
+                )
+            with zc3:
+                zone_length_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=0,
+                    key=f"mgs_zone_length_unit_{i}",
+                )
+            with zc4:
+                zone_spacing_val = st.number_input(
+                    "Zone spacing",
+                    min_value=0.0,
+                    value=20.0,
+                    step=1.0,
+                    key=f"mgs_zone_spacing_val_{i}",
+                )
+            with zc5:
+                zone_spacing_unit = st.selectbox(
+                    "Unit",
+                    cls._UNITS,
+                    index=1,  # default: cm
+                    key=f"mgs_zone_spacing_unit_{i}",
+                )
+            zone_inputs.append(
+                {
+                    "name": zone_name,
+                    "length_val": zone_length_val,
+                    "length_unit": zone_length_unit,
+                    "spacing_val": zone_spacing_val,
+                    "spacing_unit": zone_spacing_unit,
+                }
+            )
+
+        st.markdown("---")
+
+        # Convert fixed system inputs to metres
+        gutter_length_m = cls.to_meters(gutter_length_val, gutter_length_unit)
+        gutter_width_m = cls.to_meters(gutter_width_val, gutter_width_unit)
+
+        # Validate system inputs before computing
+        if gutter_length_m <= 0 or gutter_width_m <= 0 or seeds_per_gutter <= 0:
+            st.info(
+                "Enter non-zero values for gutter length, gutter width, "
+                "and seeds per gutter to see results."
+            )
+            return
+
+        # Compute per-zone stats
+        rows = []
+        total_seeds_all = 0.0
+        total_area_all = 0.0
+
+        for zi in zone_inputs:
+            zone_length_m = cls.to_meters(zi["length_val"], zi["length_unit"])
+            zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
+
+            stats = cls.compute_zone_stats(
+                gutter_length_m,
+                gutter_width_m,
+                seeds_per_gutter,
+                zone_length_m,
+                zone_spacing_m,
+            )
+
+            total_seeds_all += stats["total_seeds"]
+            total_area_all += stats["zone_area_m2"]
+
+            rows.append(
+                {
+                    "Zone": zi["name"],
+                    "Zone length (m)": round(zone_length_m, 3),
+                    "Spacing (m)": round(zone_spacing_m, 3),
+                    "Gutters in zone": round(stats["gutters_in_zone"], 1),
+                    "Total seeds": round(stats["total_seeds"], 1),
+                    "Zone area (m²)": round(stats["zone_area_m2"], 3),
+                    "Seeds/m²": round(stats["seeds_per_m2"], 2),
+                    "Seeds/sqft": round(stats["seeds_per_sqft"], 3),
+                }
+            )
+
+        # Display per-zone results
+        st.markdown("### Per-zone results")
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # Overall weighted average
+        if total_area_all > 0:
+            overall_avg_m2 = total_seeds_all / total_area_all
+            overall_avg_sqft = overall_avg_m2 / cls._SQM_TO_SQFT
+
+            st.markdown("### Overall weighted average")
+            res_col1, res_col2 = st.columns(2)
+            with res_col1:
+                st.metric("Plants/m²", f"{overall_avg_m2:.2f}")
+            with res_col2:
+                st.metric("Plants/sqft", f"{overall_avg_sqft:.3f}")
+
+            with st.expander("Show system details", expanded=False):
+                st.write(f"Gutter length (m): `{gutter_length_m:.3f}`")
+                st.write(f"Gutter width (m): `{gutter_width_m:.3f}`")
+                st.write(f"Seeds per gutter: `{seeds_per_gutter:.0f}`")
+                total_gutters = total_seeds_all / seeds_per_gutter if seeds_per_gutter > 0 else 0.0
+                st.write(f"Total gutters across all zones: `{total_gutters:.1f}`")
+                st.write(f"Total seeds across all zones: `{total_seeds_all:.1f}`")
+                st.write(f"Total area across all zones (m²): `{total_area_all:.3f}`")
+        else:
+            st.info("Enter valid zone lengths and spacings to see results.")
