@@ -1474,6 +1474,9 @@ class MGSLettuceCalculator:
             overall_avg_m2 = total_weighted_density / total_days
             overall_avg_sqft = overall_avg_m2 / cls._SQM_TO_SQFT
 
+            # Store for use by the Annualized Yield Calculator
+            cfg["computed_avg_density_m2"] = overall_avg_m2
+
             st.markdown("### Overall time-weighted average density")
             res_col1, res_col2 = st.columns(2)
             with res_col1:
@@ -1552,74 +1555,137 @@ class MGSAnnualizedYieldCalculator:
 
         st.markdown(
             """
-            Estimates the **annualized fresh-weight yield** (kg · m⁻² · year⁻¹) for a
-            Mobile Gutter System.
+            Estimates the **annualized fresh-weight yield** for a Mobile Gutter System.
 
-            Enter weight using any available measurement (gutter weight, single plant weight,
-            or weight per m²), along with average and/or final plant density.
-
-            Two results are shown:
-            - **Average density yield** — based on the weighted plant density across all zones.
-            - **Final density yield** — based on the plant density at the final (harvest) zone.
+            Select how weight is measured and choose a display unit, then enter the
+            average plant density and cycle time. Use the **Fill from Density Calculator**
+            buttons to import values computed by the MGS Density Calculator.
             """
         )
 
         cfg = cls._cfg()
 
-        # --- Weight inputs ---
-        st.markdown("#### Weight inputs")
+        # ── Weight input ──────────────────────────────────────────────────────
+        st.markdown("#### Weight input")
 
-        wcol1, wcol2, wcol3 = st.columns(3)
+        _WEIGHT_TYPES = ["Gutter weight", "Single plant weight", "Weight per m²"]
+        _WEIGHT_UNITS = ["g", "kg", "lb", "oz"]
+        _TO_KG = {"g": 0.001, "kg": 1.0, "lb": 0.453592, "oz": 0.0283495}
+        _WEIGHT_STEP = {"g": 50.0, "kg": 0.05, "lb": 0.1, "oz": 1.0}
 
-        with wcol1:
-            gutter_weight_g = st.number_input(
-                "Gutter weight (g)",
-                min_value=0.0,
-                value=cfg.get("gutter_weight_g", 0.0),
-                step=50.0,
-                help="Total fresh weight of all plants in one gutter at harvest.",
-                key="mgs_yield_gutter_weight",
+        wt_sel_col, wu_sel_col = st.columns(2)
+        with wt_sel_col:
+            _wt_default = cfg.get("weight_input_type", "Gutter weight")
+            weight_input_type = st.selectbox(
+                "Weight measurement type",
+                _WEIGHT_TYPES,
+                index=_WEIGHT_TYPES.index(_wt_default) if _wt_default in _WEIGHT_TYPES else 0,
+                key="mgs_yield_weight_type",
             )
-            cfg["gutter_weight_g"] = gutter_weight_g
-            plants_per_gutter = st.number_input(
-                "Plants per gutter",
-                min_value=0.0,
-                value=cfg.get("plants_per_gutter", 22.0),
-                step=1.0,
-                help="Number of plants in one gutter (used with gutter weight).",
-                key="mgs_yield_plants_per_gutter",
-            )
-            cfg["plants_per_gutter"] = plants_per_gutter
+            cfg["weight_input_type"] = weight_input_type
 
-        with wcol2:
-            plant_weight_g = st.number_input(
-                "Single plant weight (g)",
+        with wu_sel_col:
+            _wu_default = cfg.get("weight_unit", "g")
+            weight_unit = st.selectbox(
+                "Weight unit",
+                _WEIGHT_UNITS,
+                index=_WEIGHT_UNITS.index(_wu_default) if _wu_default in _WEIGHT_UNITS else 0,
+                key="mgs_yield_weight_unit",
+            )
+            cfg["weight_unit"] = weight_unit
+
+        to_kg = _TO_KG[weight_unit]
+
+        # Initialise variables so they are always defined
+        effective_plant_weight_kg = None
+        weight_source = None
+        weight_per_m2_val = 0.0
+
+        if weight_input_type == "Gutter weight":
+            gw_col, ppg_col = st.columns(2)
+            with gw_col:
+                gutter_weight_val = st.number_input(
+                    f"Gutter weight ({weight_unit})",
+                    min_value=0.0,
+                    value=cfg.get("gutter_weight_val", 0.0),
+                    step=_WEIGHT_STEP[weight_unit],
+                    help="Total fresh weight of all plants in one gutter at harvest.",
+                    key="mgs_yield_gutter_weight",
+                )
+                cfg["gutter_weight_val"] = gutter_weight_val
+
+            with ppg_col:
+                ppg_inp_col, ppg_btn_col = st.columns([2, 1])
+                with ppg_inp_col:
+                    plants_per_gutter = st.number_input(
+                        "Plants per gutter",
+                        min_value=0.0,
+                        value=cfg.get("plants_per_gutter", 22.0),
+                        step=1.0,
+                        help="Number of plants in one gutter.",
+                        key="mgs_yield_plants_per_gutter",
+                    )
+                    cfg["plants_per_gutter"] = plants_per_gutter
+                with ppg_btn_col:
+                    st.write("")
+                    st.write("")
+                    if st.button(
+                        "Fill from density calculator",
+                        key="mgs_yield_fill_ppg",
+                        use_container_width=True,
+                    ):
+                        dc = st.session_state.get("mgs_density_cfg", {})
+                        val = dc.get("seeds_per_gutter")
+                        if val:
+                            cfg["plants_per_gutter"] = float(val)
+                            st.session_state["mgs_yield_plants_per_gutter"] = float(val)
+                            st.rerun()
+                        else:
+                            st.warning(
+                                "No value available. Run the MGS Density Calculator first."
+                            )
+
+            if gutter_weight_val > 0 and plants_per_gutter > 0:
+                effective_plant_weight_kg = (gutter_weight_val * to_kg) / plants_per_gutter
+                weight_source = (
+                    f"gutter weight ({gutter_weight_val:.1f} {weight_unit}) "
+                    f"÷ plants per gutter ({plants_per_gutter:.0f})"
+                )
+
+        elif weight_input_type == "Single plant weight":
+            plant_weight_val = st.number_input(
+                f"Single plant weight ({weight_unit})",
                 min_value=0.0,
-                value=cfg.get("plant_weight_g", 0.0),
-                step=5.0,
+                value=cfg.get("plant_weight_val", 0.0),
+                step=_WEIGHT_STEP[weight_unit],
                 help="Average fresh weight per plant at harvest.",
                 key="mgs_yield_plant_weight",
             )
-            cfg["plant_weight_g"] = plant_weight_g
+            cfg["plant_weight_val"] = plant_weight_val
 
-        with wcol3:
-            weight_per_m2_kg = st.number_input(
-                "Fresh weight per m² (kg/m²)",
+            if plant_weight_val > 0:
+                effective_plant_weight_kg = plant_weight_val * to_kg
+                weight_source = f"single plant weight ({plant_weight_val:.1f} {weight_unit})"
+
+        else:  # Weight per m²
+            weight_per_m2_val = st.number_input(
+                f"Fresh weight per m² ({weight_unit}/m²)",
                 min_value=0.0,
-                value=cfg.get("weight_per_m2_kg", 0.0),
-                step=0.5,
-                help="Total fresh weight per square metre of growing area at harvest. "
-                     "Used directly — density inputs are not required.",
+                value=cfg.get("weight_per_m2_val", 0.0),
+                step=_WEIGHT_STEP[weight_unit],
+                help=(
+                    "Total fresh weight per square metre of growing area at harvest. "
+                    "Used directly — density input is not required."
+                ),
                 key="mgs_yield_weight_per_m2",
             )
-            cfg["weight_per_m2_kg"] = weight_per_m2_kg
+            cfg["weight_per_m2_val"] = weight_per_m2_val
 
-        # --- Density inputs ---
-        st.markdown("#### Density inputs")
+        # ── Density input ─────────────────────────────────────────────────────
+        st.markdown("#### Density input")
 
-        dcol1, dcol2 = st.columns(2)
-
-        with dcol1:
+        dens_inp_col, dens_btn_col = st.columns([3, 1])
+        with dens_inp_col:
             avg_density = st.number_input(
                 "Average density (plants/m²)",
                 min_value=0.0,
@@ -1630,24 +1696,32 @@ class MGSAnnualizedYieldCalculator:
             )
             cfg["avg_density"] = avg_density
 
-        with dcol2:
-            final_density = st.number_input(
-                "Final density (plants/m²)",
-                min_value=0.0,
-                value=cfg.get("final_density", 0.0),
-                step=5.0,
-                help="Plant density in the final (harvest) zone.",
-                key="mgs_yield_final_density",
-            )
-            cfg["final_density"] = final_density
+        with dens_btn_col:
+            st.write("")
+            st.write("")
+            if st.button(
+                "Fill from density calculator",
+                key="mgs_yield_fill_density",
+                use_container_width=True,
+            ):
+                dc = st.session_state.get("mgs_density_cfg", {})
+                val = dc.get("computed_avg_density_m2")
+                if val:
+                    cfg["avg_density"] = float(val)
+                    st.session_state["mgs_yield_avg_density"] = float(val)
+                    st.rerun()
+                else:
+                    st.warning(
+                        "No value available. Run the MGS Density Calculator first."
+                    )
 
-        # --- Cycle time ---
+        # ── Cycle time ────────────────────────────────────────────────────────
         st.markdown("---")
         st.markdown("#### Cycle time")
 
-        col_ct1, col_ct2 = st.columns(2)
+        ct_inp_col, ct_btn_col, ct_right_col = st.columns([2, 1, 2])
 
-        with col_ct1:
+        with ct_inp_col:
             cycle_time_days = st.number_input(
                 "Total cycle time (days, seed to harvest)",
                 min_value=1.0,
@@ -1666,7 +1740,31 @@ class MGSAnnualizedYieldCalculator:
             )
             cfg["germ_time_hrs"] = germ_time_hrs
 
-        with col_ct2:
+        with ct_btn_col:
+            st.write("")
+            st.write("")
+            if st.button(
+                "Fill from density calculator",
+                key="mgs_yield_fill_cycle",
+                use_container_width=True,
+            ):
+                dc = st.session_state.get("mgs_density_cfg", {})
+                zones = dc.get("zones", [])
+                num_zones = int(dc.get("num_zones", len(zones)))
+                total_days = sum(
+                    float(z.get("days_in_zone", 0.0)) for z in zones[:num_zones]
+                )
+                if total_days > 0:
+                    cfg["cycle_time_days"] = total_days
+                    st.session_state["mgs_yield_cycle"] = total_days
+                    st.rerun()
+                else:
+                    st.warning(
+                        "No cycle time available. "
+                        "Configure zones in the MGS Density Calculator first."
+                    )
+
+        with ct_right_col:
             exclude_germ = st.checkbox(
                 "Exclude germination time from cycle",
                 value=cfg.get("exclude_germ", False),
@@ -1690,18 +1788,7 @@ class MGSAnnualizedYieldCalculator:
                 effective_cycle = cycle_time_days
                 st.caption(f"Effective cycle = **{effective_cycle:.0f} days**")
 
-        # --- Determine per-plant weight ---
-        if gutter_weight_g > 0 and plants_per_gutter > 0:
-            effective_plant_weight_kg = (gutter_weight_g / plants_per_gutter) / 1000.0
-            weight_source = f"gutter weight ({gutter_weight_g:.0f} g) ÷ plants per gutter ({plants_per_gutter:.0f})"
-        elif plant_weight_g > 0:
-            effective_plant_weight_kg = plant_weight_g / 1000.0
-            weight_source = f"single plant weight ({plant_weight_g:.1f} g)"
-        else:
-            effective_plant_weight_kg = None
-            weight_source = None
-
-        # --- Results ---
+        # ── Results ───────────────────────────────────────────────────────────
         st.markdown("---")
         st.markdown("### Results")
 
@@ -1711,71 +1798,62 @@ class MGSAnnualizedYieldCalculator:
 
         cycles_per_year = 365.0 / effective_cycle
 
+        # Multiply kg result by this factor to get the selected unit
+        from_kg = 1.0 / to_kg
+        unit_label = f"{weight_unit}/m²/year"
+
         results = []
 
-        if weight_per_m2_kg > 0:
-            yield_direct = weight_per_m2_kg * cycles_per_year
+        if weight_input_type == "Weight per m²" and weight_per_m2_val > 0:
+            yield_direct_kg = weight_per_m2_val * to_kg * cycles_per_year
+            yield_direct_display = yield_direct_kg * from_kg
             results.append(
                 (
                     "Annualized yield (weight/m²)",
-                    f"{yield_direct:.2f} kg/m²/year",
+                    f"{yield_direct_display:.2f} {unit_label}",
                     "Based on fresh weight per m² × cycles per year.",
                 )
             )
 
         if effective_plant_weight_kg and avg_density > 0:
-            yield_avg = avg_density * effective_plant_weight_kg * cycles_per_year
+            yield_avg_kg = avg_density * effective_plant_weight_kg * cycles_per_year
+            yield_avg_display = yield_avg_kg * from_kg
             results.append(
                 (
                     "Annualized yield — average density",
-                    f"{yield_avg:.2f} kg/m²/year",
+                    f"{yield_avg_display:.2f} {unit_label}",
                     "Based on the weighted average density across all MGS zones.",
-                )
-            )
-
-        if effective_plant_weight_kg and final_density > 0:
-            yield_final = final_density * effective_plant_weight_kg * cycles_per_year
-            results.append(
-                (
-                    "Annualized yield — final density",
-                    f"{yield_final:.2f} kg/m²/year",
-                    "Based on the plant density in the final (harvest) zone.",
                 )
             )
 
         if not results:
             st.info(
                 "Enter valid weight and density inputs above to see results. "
-                "Provide at least one weight input (gutter weight, single plant weight, "
-                "or fresh weight per m²) and at least one density input."
+                "Provide a weight input and, for gutter or plant weight, an average density."
             )
             return
 
-        if len(results) == 1:
-            st.metric(results[0][0], results[0][1], help=results[0][2])
-        elif len(results) == 2:
-            r1, r2 = st.columns(2)
-            with r1:
-                st.metric(results[0][0], results[0][1], help=results[0][2])
-            with r2:
-                st.metric(results[1][0], results[1][1], help=results[1][2])
-        else:
-            r1, r2, r3 = st.columns(3)
-            for col, item in zip([r1, r2, r3], results):
-                with col:
-                    st.metric(item[0], item[1], help=item[2])
+        cols = st.columns(len(results))
+        for col, item in zip(cols, results):
+            with col:
+                st.metric(item[0], item[1], help=item[2])
 
         with st.expander("Show calculation details", expanded=False):
             if weight_source:
-                plant_wt_display = effective_plant_weight_kg * 1000
+                plant_wt_g = effective_plant_weight_kg * 1000.0
                 st.write(
-                    f"Plant fresh weight: `{plant_wt_display:.1f} g` = "
-                    f"`{effective_plant_weight_kg:.4f} kg` (from {weight_source})"
+                    f"Plant fresh weight: `{plant_wt_g:.2f} g` = "
+                    f"`{effective_plant_weight_kg:.5f} kg` (from {weight_source})"
                 )
-            if weight_per_m2_kg > 0:
-                st.write(f"Fresh weight per m²: `{weight_per_m2_kg:.3f} kg/m²`")
+            if weight_input_type == "Weight per m²" and weight_per_m2_val > 0:
+                st.write(
+                    f"Fresh weight per m²: `{weight_per_m2_val:.3f} {weight_unit}/m²` = "
+                    f"`{weight_per_m2_val * to_kg:.4f} kg/m²`"
+                )
             st.write(f"Total cycle time: `{cycle_time_days:.0f} days`")
-            st.write(f"Germination time: `{germ_time_hrs:.0f} hrs` = `{germ_time_days_equiv:.2f} days`")
+            st.write(
+                f"Germination time: `{germ_time_hrs:.0f} hrs` = `{germ_time_days_equiv:.2f} days`"
+            )
             st.write(
                 f"Germination excluded from cycle: `{'Yes' if exclude_germ else 'No'}`"
             )
@@ -1784,20 +1862,12 @@ class MGSAnnualizedYieldCalculator:
             if avg_density > 0 and effective_plant_weight_kg:
                 st.markdown("---")
                 st.write(f"Average density: `{avg_density:.2f} plants/m²`")
-                yield_avg_det = avg_density * effective_plant_weight_kg * cycles_per_year
+                y_kg = avg_density * effective_plant_weight_kg * cycles_per_year
+                y_display = y_kg * from_kg
                 st.write(
                     f"Yield (avg density) = {avg_density:.2f} × "
-                    f"{effective_plant_weight_kg:.4f} × {cycles_per_year:.2f} "
-                    f"= **{yield_avg_det:.2f} kg/m²/year**"
-                )
-            if final_density > 0 and effective_plant_weight_kg:
-                st.markdown("---")
-                st.write(f"Final density: `{final_density:.2f} plants/m²`")
-                yield_final_det = final_density * effective_plant_weight_kg * cycles_per_year
-                st.write(
-                    f"Yield (final density) = {final_density:.2f} × "
-                    f"{effective_plant_weight_kg:.4f} × {cycles_per_year:.2f} "
-                    f"= **{yield_final_det:.2f} kg/m²/year**"
+                    f"{effective_plant_weight_kg:.5f} kg × {cycles_per_year:.2f} "
+                    f"= **{y_kg:.4f} kg/m²/year** = **{y_display:.2f} {unit_label}**"
                 )
 
 
