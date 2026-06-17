@@ -8,6 +8,9 @@ from typing import List, Tuple
 import streamlit as st
 from PIL import Image
 import numpy as np
+import pillow_heif
+
+pillow_heif.register_heif_opener()
 
 # For document image extraction
 import fitz  # PyMuPDF
@@ -221,6 +224,7 @@ class ImagingToolsUI:
             - Optional resizing to a maximum dimension
             - JPEG re-encoding with adjusted quality to aim for your target size
             
+            Supports **JPEG, PNG, HEIC/HEIF**, and other common image formats.
             Non-image files are included unchanged in the ZIP.
             """
         )
@@ -281,16 +285,14 @@ class ImagingToolsUI:
             ext = os.path.splitext(f.name)[1].lower()
 
             is_image = False
+            img = None
             try:
-                img = Image.open(io.BytesIO(raw_bytes))
-                img.verify()
+                img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
                 is_image = True
             except Exception:
                 is_image = False
 
             if is_image:
-                img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-
                 compressed_bytes = ImagingToolsUI._compress_image(
                     img,
                     target_size_kb=target_size_kb,
