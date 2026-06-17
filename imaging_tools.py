@@ -8,6 +8,9 @@ from typing import List, Tuple
 import streamlit as st
 from PIL import Image
 import numpy as np
+import pillow_heif
+
+pillow_heif.register_heif_opener()
 
 # For document image extraction
 import fitz  # PyMuPDF
@@ -222,6 +225,8 @@ class ImagingToolsUI:
             Images are compressed by:
             - Optional resizing to a maximum dimension
             - JPEG re-encoding with adjusted quality to aim for your target size
+            
+            **HEIC/HEIF files** are automatically converted to JPEG before compression.
             
             Non-image files are included unchanged in the ZIP.
             """
