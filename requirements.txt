@@ -1,4 +1,5 @@
 streamlit==1.40.0
+pillow-heif
 opencv-python-headless==4.10.0.84
 numpy
 pillow
