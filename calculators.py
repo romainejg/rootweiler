@@ -1169,10 +1169,10 @@ class MGSLettuceCalculator:
     Fixed system inputs (entered once):
     - Gutter length  (m, cm, ft, or in)
     - Gutter width   (m, cm, ft, or in)
-    - Seeds per gutter
 
     Per-zone inputs (repeated for each zone):
     - Zone name / label
+    - Seeds per gutter  (can differ between zones to account for transplants)
     - Zone length    (m, cm, ft, or in)
     - Zone spacing   (gap between gutters, m, cm, ft, or in)
 
@@ -1298,7 +1298,7 @@ class MGSLettuceCalculator:
 
         st.markdown("#### System inputs")
 
-        col1, col2, col3 = st.columns([2, 1, 2])
+        col1, col2 = st.columns([2, 1])
 
         with col1:
             gutter_length_val = st.number_input(
@@ -1318,15 +1318,6 @@ class MGSLettuceCalculator:
                 key="mgs_gutter_length_unit",
             )
             cfg["gutter_length_unit"] = gutter_length_unit
-        with col3:
-            seeds_per_gutter = st.number_input(
-                "Seeds per gutter",
-                min_value=0.0,
-                value=cfg.get("seeds_per_gutter", 22.0),
-                step=1.0,
-                key="mgs_seeds_per_gutter",
-            )
-            cfg["seeds_per_gutter"] = seeds_per_gutter
 
         col4, col5 = st.columns([2, 1])
         with col4:
@@ -1371,7 +1362,7 @@ class MGSLettuceCalculator:
             zc = zones_cfg[i]
 
             st.markdown(f"**Zone {i + 1}**")
-            zc1, zc2, zc3, zc4 = st.columns([2, 2, 2, 1])
+            zc1, zc2, zc3, zc4, zc5 = st.columns([2, 2, 2, 2, 1])
             with zc1:
                 zone_name = st.text_input(
                     "Zone name",
@@ -1390,6 +1381,16 @@ class MGSLettuceCalculator:
                 )
                 zc["days_in_zone"] = days_in_zone
             with zc3:
+                zone_seeds_per_gutter = st.number_input(
+                    "Seeds per gutter",
+                    min_value=0.0,
+                    value=zc.get("seeds_per_gutter", 22.0),
+                    step=1.0,
+                    help="Seeds/plants per gutter in this zone. Adjust to account for transplants.",
+                    key=f"mgs_seeds_per_gutter_{i}",
+                )
+                zc["seeds_per_gutter"] = zone_seeds_per_gutter
+            with zc4:
                 zone_spacing_val = st.number_input(
                     "Zone spacing",
                     min_value=0.0,
@@ -1398,7 +1399,7 @@ class MGSLettuceCalculator:
                     key=f"mgs_zone_spacing_val_{i}",
                 )
                 zc["spacing_val"] = zone_spacing_val
-            with zc4:
+            with zc5:
                 _sp_unit = zc.get("spacing_unit", "cm")
                 zone_spacing_unit = st.selectbox(
                     "Unit",
@@ -1411,6 +1412,7 @@ class MGSLettuceCalculator:
                 {
                     "name": zone_name,
                     "days_in_zone": days_in_zone,
+                    "seeds_per_gutter": zone_seeds_per_gutter,
                     "spacing_val": zone_spacing_val,
                     "spacing_unit": zone_spacing_unit,
                 }
@@ -1426,10 +1428,10 @@ class MGSLettuceCalculator:
         gutter_width_m = cls.to_meters(gutter_width_val, gutter_width_unit)
 
         # Validate system inputs before computing
-        if gutter_length_m <= 0 or gutter_width_m <= 0 or seeds_per_gutter <= 0:
+        if gutter_length_m <= 0 or gutter_width_m <= 0:
             st.info(
-                "Enter non-zero values for gutter length, gutter width, "
-                "and seeds per gutter to see results."
+                "Enter non-zero values for gutter length and gutter width "
+                "to see results."
             )
             return
 
@@ -1441,12 +1443,13 @@ class MGSLettuceCalculator:
         for zi in zone_inputs:
             zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
             days = zi["days_in_zone"]
+            zone_seeds = zi["seeds_per_gutter"]
 
             seeds_per_m2 = cls.compute_seeds_per_m2(
                 gutter_length_m,
                 gutter_width_m,
                 zone_spacing_m,
-                seeds_per_gutter,
+                zone_seeds,
             )
             seeds_per_sqft = seeds_per_m2 / cls._SQM_TO_SQFT
 
@@ -1457,6 +1460,7 @@ class MGSLettuceCalculator:
                 {
                     "Zone": zi["name"],
                     "Days in zone": round(days, 1),
+                    "Seeds/plants per gutter": int(zone_seeds),
                     "Spacing (m)": round(zone_spacing_m, 3),
                     "Plants/m²": round(seeds_per_m2, 2),
                     "Plants/sqft": round(seeds_per_sqft, 3),
@@ -1487,7 +1491,6 @@ class MGSLettuceCalculator:
             with st.expander("Show system details", expanded=False):
                 st.write(f"Gutter length (m): `{gutter_length_m:.3f}`")
                 st.write(f"Gutter width (m): `{gutter_width_m:.3f}`")
-                st.write(f"Seeds per gutter: `{seeds_per_gutter:.0f}`")
                 st.write(f"Total days across all zones: `{total_days:.1f}`")
                 st.write(
                     f"Time-weighted average density: `{overall_avg_m2:.2f} plants/m²`"
