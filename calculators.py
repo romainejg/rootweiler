@@ -1188,9 +1188,9 @@ class MGSLettuceCalculator:
     _UNITS = ["m", "cm", "ft", "in"]
     _SQM_TO_SQFT = 10.7639  # 1 m² = 10.7639 ft²
     _CFG_KEY = "mgs_density_cfg"
-    _MAX_GUTTER_LINES = 40  # max gutter lines drawn per zone to avoid overcrowding
-    _MAX_PLANTS_PER_GUTTER = 80
-    _MAX_PLANT_CIRCLES = 2500
+    _MAX_GUTTER_LINES = 40  # cap visual gutter lines to keep the chart readable
+    _MAX_PLANTS_PER_GUTTER = 80  # cap plants per gutter for responsive rendering
+    _MAX_PLANT_CIRCLES = 2500  # cap total circles to avoid heavy Plotly payloads
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
     _INCH_TO_M = 0.0254
 
@@ -1287,7 +1287,7 @@ class MGSLettuceCalculator:
     def _week_from_day(day_number: float) -> int:
         """Return crop week from day count (days 1-7 = week 1, etc.)."""
         if day_number <= 0:
-            return 0
+            return 1
         return int(np.ceil(day_number / 7.0))
 
     @classmethod
@@ -1360,8 +1360,8 @@ class MGSLettuceCalculator:
             color = palette[idx % len(palette)]
             name = zi["name"]
             zone_exit_day = cumulative_day + days
-            diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
-            diameter_in = diameter_m / cls._INCH_TO_M
+            zone_exit_diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
+            zone_exit_diameter_in = zone_exit_diameter_m / cls._INCH_TO_M
             plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
@@ -1380,13 +1380,17 @@ class MGSLettuceCalculator:
 
             # Gutter lines inside the zone (capped to avoid overcrowding).
             if pitch_m > 0:
+                # zone_width is in display metres (days × m/day), so dividing by pitch_m
+                # gives a relative gutter count in the same display frame.
                 num_gutters = max(1, int(round(zone_width / pitch_m)))
                 n_draw = min(num_gutters, cls._MAX_GUTTER_LINES)
                 gutter_step = zone_width / n_draw if n_draw > 0 else zone_width
 
                 for g in range(n_draw):
                     gx = x_cursor + (g + 0.5) * gutter_step
-                    gutter_centers.append(gx)
+                    day_at_gutter = cumulative_day + ((g + 0.5) / n_draw) * days
+                    gutter_diameter_m = cls._plant_diameter_m_from_day(day_at_gutter)
+                    gutter_centers.append((gx, gutter_diameter_m))
                     fig.add_shape(
                         type="line",
                         x0=gx,
@@ -1401,9 +1405,9 @@ class MGSLettuceCalculator:
             if gutter_centers and plants_drawn < cls._MAX_PLANT_CIRCLES:
                 plants_to_draw = max(1, min(plants_per_gutter, cls._MAX_PLANTS_PER_GUTTER))
                 y_step = gutter_length_m / plants_to_draw
-                radius = diameter_m / 2.0
 
-                for gx in gutter_centers:
+                for gx, gutter_diameter_m in gutter_centers:
+                    radius = gutter_diameter_m / 2.0
                     for p in range(plants_to_draw):
                         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
                             break
@@ -1430,7 +1434,7 @@ class MGSLettuceCalculator:
                 f"{days:.0f} days<br>"
                 f"{seeds_per_m2:.1f} plants/m²<br>"
                 f"spacing: {zone_spacing_m * 100:.1f} cm<br>"
-                f"diameter: {diameter_in:.0f} in"
+                f"diameter: {zone_exit_diameter_in:.0f} in"
             )
             fig.add_annotation(
                 x=mid_x,
@@ -1504,7 +1508,7 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circles represent diameter by crop age: week 1 = 1 inch diameter, week 2 = 2 inches, week 3 = 3 inches, etc."
+            "Plant circles represent crop diameter using the weekly schedule (+1 inch per week)."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
