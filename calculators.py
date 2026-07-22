@@ -1296,10 +1296,12 @@ class MGSLettuceCalculator:
         if spacing_m >= diameter_m:
             return 0.0
         radius = diameter_m / 2.0
-        if radius <= 0:
+        if radius <= 1e-12:
             return 0.0
 
         d = spacing_m
+        if (2.0 * radius) <= 1e-12:
+            return 0.0
         # Equal-circle lens overlap area formula.
         overlap_area = (
             2.0 * radius * radius * math.acos(min(1.0, d / (2.0 * radius)))
@@ -1667,7 +1669,7 @@ class MGSLettuceCalculator:
                     min_value=0.0,
                     value=zc.get("spacing_val", 20.0),
                     step=1.0,
-                    help="Center-to-center spacing between gutters.",
+                    help="Center-to-Center spacing between gutters.",
                     key=f"mgs_zone_spacing_val_{i}",
                 )
                 zc["spacing_val"] = zone_spacing_val
@@ -1768,10 +1770,11 @@ class MGSLettuceCalculator:
             st.markdown("### System layout")
             if st.button("Generate system layout visual", key="mgs_generate_layout"):
                 st.session_state["mgs_show_layout"] = True
-            if st.session_state.get("mgs_show_layout", False):
-                if st.button("Hide system layout visual", key="mgs_hide_layout"):
-                    st.session_state["mgs_show_layout"] = False
-            if st.session_state.get("mgs_show_layout", False):
+            show_layout = st.session_state.get("mgs_show_layout", False)
+            if show_layout and st.button("Hide system layout visual", key="mgs_hide_layout"):
+                st.session_state["mgs_show_layout"] = False
+                show_layout = False
+            if show_layout:
                 cls._render_system_visual(
                     zone_inputs, gutter_length_m, gutter_width_m
                 )
