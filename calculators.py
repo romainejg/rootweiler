@@ -1191,6 +1191,7 @@ class MGSLettuceCalculator:
     _MAX_GUTTER_LINES = 40  # max gutter lines drawn per zone to avoid overcrowding
     _MAX_PLANTS_PER_GUTTER = 80
     _MAX_PLANT_CIRCLES = 2500
+    _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1333,7 +1334,11 @@ class MGSLettuceCalculator:
             pitch_m = gutter_width_m + zone_spacing_m
             if pitch_m > 0:
                 zone_pitches.append(pitch_m)
-        day_scale_m = float(np.mean(zone_pitches)) if zone_pitches else max(gutter_width_m, 0.05)
+        day_scale_m = (
+            float(np.mean(zone_pitches))
+            if zone_pitches
+            else max(gutter_width_m, cls._MIN_DAY_SCALE_M)
+        )
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
@@ -1475,6 +1480,8 @@ class MGSLettuceCalculator:
                 showgrid=False,
                 zeroline=False,
                 range=[-gutter_length_m * 0.1, gutter_length_m * 1.2],
+                # Keep x and y in a 1:1 data-unit scale so plant diameters and
+                # gutter spacing are visually comparable in metre-like units.
                 scaleanchor="x",
                 scaleratio=1,
             ),
@@ -1496,7 +1503,7 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circle diameter uses crop age: week 1 = 1 in, week 2 = 2 in, week 3 = 3 in, etc."
+            "Plant circle diameter uses crop age: week 1 = 1 inch, week 2 = 2 inches, week 3 = 3 inches, etc."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
