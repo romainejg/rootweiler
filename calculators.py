@@ -1287,7 +1287,7 @@ class MGSLettuceCalculator:
     def _week_from_day(day_number: float) -> int:
         """Return crop week from day count (days 1-7 = week 1, etc.)."""
         if day_number <= 0:
-            return 1
+            return 0
         return int(np.ceil(day_number / 7.0))
 
     @classmethod
@@ -1338,7 +1338,7 @@ class MGSLettuceCalculator:
         day_scale_m = (
             np.mean(zone_pitches)
             if zone_pitches
-            else max(gutter_width_m, cls._MIN_DAY_SCALE_M)
+            else cls._MIN_DAY_SCALE_M
         )
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
@@ -1399,9 +1399,7 @@ class MGSLettuceCalculator:
             # Plant circles on each gutter, with diameter based on crop week.
             # Draw a capped count to keep rendering responsive.
             if gutter_centers and plants_drawn < cls._MAX_PLANT_CIRCLES:
-                plants_to_draw = min(plants_per_gutter, cls._MAX_PLANTS_PER_GUTTER)
-                if plants_to_draw <= 0:
-                    plants_to_draw = 1
+                plants_to_draw = max(1, min(plants_per_gutter, cls._MAX_PLANTS_PER_GUTTER))
                 y_step = gutter_length_m / plants_to_draw
                 radius = diameter_m / 2.0
 
@@ -1506,7 +1504,7 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circles use diameter by crop age: week 1 = 1 inch diameter, week 2 = 2 inches, week 3 = 3 inches, etc."
+            "Plant circles represent diameter by crop age: week 1 = 1 inch diameter, week 2 = 2 inches, week 3 = 3 inches, etc."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
