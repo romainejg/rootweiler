@@ -1192,6 +1192,12 @@ class MGSLettuceCalculator:
     _MAX_PLANT_CIRCLES = 2500  # cap total circles to avoid heavy Plotly payloads
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
     _INCH_TO_M = 0.0254
+    # Visual layout sizing constants used to convert data-unit diameters to marker pixels.
+    # Figure height is set to 380 px with margins t=30, b=10 → ~340 px usable height.
+    # The y data range spans gutter_length_m * 1.3 (range=[-0.1, 1.2] × gutter_length_m).
+    _VIS_EFF_HEIGHT_PX = 340.0
+    _VIS_Y_RANGE_FACTOR = 1.3
+    _MIN_MARKER_SIZE_PX = 4.0  # smallest marker diameter (px) for plant circle traces
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1360,11 +1366,9 @@ class MGSLettuceCalculator:
         fig = go.Figure()
 
         # Estimate pixel-to-metre ratio for marker sizing.
-        # Fig height = 380px; margins t=30, b=10 → ~340px usable.
-        # Y data range = gutter_length_m * 1.3 (from range setting below).
-        _eff_height_px = 340.0
-        _y_data_range = gutter_length_m * 1.3
-        px_per_m = _eff_height_px / _y_data_range if _y_data_range > 0 else 100.0
+        # See class constants _VIS_EFF_HEIGHT_PX and _VIS_Y_RANGE_FACTOR for details.
+        _y_data_range = gutter_length_m * cls._VIS_Y_RANGE_FACTOR
+        px_per_m = cls._VIS_EFF_HEIGHT_PX / _y_data_range if _y_data_range > 0 else 100.0
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
@@ -1447,7 +1451,7 @@ class MGSLettuceCalculator:
                 scatter_size: list = []
 
                 for gx, gutter_diameter_m in gutter_centers:
-                    size_px = max(4.0, gutter_diameter_m * px_per_m)
+                    size_px = max(cls._MIN_MARKER_SIZE_PX, gutter_diameter_m * px_per_m)
                     for p in range(plants_to_draw):
                         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
                             break
