@@ -1189,6 +1189,8 @@ class MGSLettuceCalculator:
     _SQM_TO_SQFT = 10.7639  # 1 m² = 10.7639 ft²
     _CFG_KEY = "mgs_density_cfg"
     _MAX_GUTTER_LINES = 40  # max gutter lines drawn per zone to avoid overcrowding
+    _MAX_PLANTS_PER_GUTTER = 80
+    _MAX_PLANT_CIRCLES = 2500
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1279,6 +1281,20 @@ class MGSLettuceCalculator:
             "seeds_per_sqft": seeds_per_sqft,
         }
 
+    @staticmethod
+    def _week_from_day(day_number: float) -> int:
+        """Return crop week from day count (days 1-7 = week 1, etc.)."""
+        if day_number <= 0:
+            return 1
+        return max(1, int(np.ceil(day_number / 7.0)))
+
+    @classmethod
+    def _diameter_m_from_day(cls, day_number: float) -> float:
+        """Plant diameter in metres using 1 in/week growth (week N = N inches)."""
+        week_num = cls._week_from_day(day_number)
+        diameter_in = float(week_num)
+        return diameter_in * 0.0254
+
     @classmethod
     def _render_system_visual(
         cls,
@@ -1290,11 +1306,10 @@ class MGSLettuceCalculator:
         Render a top-down Plotly diagram of the MGS system.
 
         Layout convention:
-        - X axis  → direction gutters travel through zones (each zone is a column)
+        - X axis  → relative zone width (scaled from time in zone)
         - Y axis  → gutter length direction
-        - Zone width is proportional to days spent in that zone
-        - Horizontal lines inside each zone represent individual gutters
-          spaced at the zone's gutter pitch (gutter_width + zone_spacing)
+        - Dotted vertical lines represent individual gutters
+        - Circles on gutters represent plant position and diameter by week
         """
         total_days = sum(zi["days_in_zone"] for zi in zone_inputs)
         if total_days <= 0 or gutter_length_m <= 0:
@@ -1310,9 +1325,20 @@ class MGSLettuceCalculator:
 
         fig = go.Figure()
 
-        x_cursor = 0.0  # running x position as zones are placed left-to-right
+        # Use a fixed metres/day scale so gutter pitch and plant diameters are visualized
+        # in the same axis units. This keeps spacing vs plant size comparisons intuitive.
+        zone_pitches = []
+        for zi in zone_inputs:
+            zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
+            pitch_m = gutter_width_m + zone_spacing_m
+            if pitch_m > 0:
+                zone_pitches.append(pitch_m)
+        day_scale_m = float(np.mean(zone_pitches)) if zone_pitches else max(gutter_width_m, 0.05)
 
-        # Normalise: total x span = total_days (days are the width unit)
+        x_cursor = 0.0  # running x position as zones are placed left-to-right
+        cumulative_day = 0.0
+        plants_drawn = 0
+
         for idx, zi in enumerate(zone_inputs):
             days = zi["days_in_zone"]
             if days <= 0:
@@ -1324,9 +1350,13 @@ class MGSLettuceCalculator:
                 gutter_length_m, gutter_width_m, zone_spacing_m, zi["seeds_per_gutter"]
             )
 
-            zone_width = days  # proportional to days
+            zone_width = days * day_scale_m  # proportional to days, in metre-like display units
             color = palette[idx % len(palette)]
             name = zi["name"]
+            day_mid = cumulative_day + (days / 2.0)
+            diameter_m = cls._diameter_m_from_day(day_mid)
+            diameter_in = diameter_m / 0.0254
+            plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
             fig.add_shape(
@@ -1340,25 +1370,50 @@ class MGSLettuceCalculator:
                 line=dict(color=color, width=2),
             )
 
-            # Gutter lines inside the zone.
-            # Gutters run parallel to gutter length (vertical in diagram).
-            # They are spaced by pitch_m along the X axis.
-            # Cap at _MAX_GUTTER_LINES to avoid overcrowding.
+            gutter_centers = []
+
+            # Gutter lines inside the zone (capped to avoid overcrowding).
             if pitch_m > 0:
-                num_gutters = zone_width / pitch_m
-                if num_gutters > 0:
-                    pitch_days = zone_width / num_gutters
-                    n_draw = min(int(num_gutters), cls._MAX_GUTTER_LINES)
-                    for g in range(n_draw):
-                        gx = x_cursor + (g + 0.5) * pitch_days
+                num_gutters = max(1, int(round(zone_width / pitch_m)))
+                n_draw = min(num_gutters, cls._MAX_GUTTER_LINES)
+                gutter_step = zone_width / n_draw if n_draw > 0 else zone_width
+
+                for g in range(n_draw):
+                    gx = x_cursor + (g + 0.5) * gutter_step
+                    gutter_centers.append(gx)
+                    fig.add_shape(
+                        type="line",
+                        x0=gx,
+                        y0=0,
+                        x1=gx,
+                        y1=gutter_length_m,
+                        line=dict(color=color, width=1.2, dash="dot"),
+                    )
+
+            # Plant circles on each gutter, with diameter based on crop week.
+            # Draw a capped count to keep rendering responsive.
+            if gutter_centers and plants_drawn < cls._MAX_PLANT_CIRCLES:
+                plants_to_draw = min(plants_per_gutter, cls._MAX_PLANTS_PER_GUTTER)
+                y_step = gutter_length_m / plants_to_draw
+                radius = diameter_m / 2.0
+
+                for gx in gutter_centers:
+                    for p in range(plants_to_draw):
+                        if plants_drawn >= cls._MAX_PLANT_CIRCLES:
+                            break
+                        gy = (p + 0.5) * y_step
                         fig.add_shape(
-                            type="line",
-                            x0=gx,
-                            y0=0,
-                            x1=gx,
-                            y1=gutter_length_m,
-                            line=dict(color=color, width=1.2, dash="dot"),
+                            type="circle",
+                            x0=gx - radius,
+                            y0=gy - radius,
+                            x1=gx + radius,
+                            y1=gy + radius,
+                            line=dict(color=color, width=1.0),
+                            fillcolor="rgba(255,255,255,0.15)",
                         )
+                        plants_drawn += 1
+                    if plants_drawn >= cls._MAX_PLANT_CIRCLES:
+                        break
 
             # Zone label annotation (centred in the zone rectangle)
             mid_x = x_cursor + zone_width / 2
@@ -1368,7 +1423,8 @@ class MGSLettuceCalculator:
                 f"<b>{name}</b><br>"
                 f"{days:.0f} days<br>"
                 f"{seeds_per_m2:.1f} plants/m²<br>"
-                f"spacing: {zone_spacing_m * 100:.1f} cm"
+                f"spacing: {zone_spacing_m * 100:.1f} cm<br>"
+                f"diameter: {diameter_in:.0f} in"
             )
             fig.add_annotation(
                 x=mid_x,
@@ -1400,15 +1456,18 @@ class MGSLettuceCalculator:
                 )
 
             x_cursor += zone_width
+            cumulative_day += days
+
+        total_width = x_cursor
 
         # Axis labels & styling
         fig.update_layout(
             xaxis=dict(
-                title="Zone width (proportional to days)",
+                title=f"Relative zone width (scaled by {day_scale_m:.2f} m/day)",
                 showticklabels=False,
                 showgrid=False,
                 zeroline=False,
-                range=[-total_days * 0.02, total_days * 1.05],
+                range=[-total_width * 0.02, total_width * 1.05],
             ),
             yaxis=dict(
                 title=f"Gutter length ({gutter_length_m:.2f} m)",
@@ -1417,9 +1476,9 @@ class MGSLettuceCalculator:
                 zeroline=False,
                 range=[-gutter_length_m * 0.1, gutter_length_m * 1.2],
                 scaleanchor="x",
-                scaleratio=1 / (total_days / gutter_length_m),
+                scaleratio=1,
             ),
-            height=340,
+            height=380,
             margin=dict(l=10, r=10, t=30, b=10),
             plot_bgcolor="rgba(245,247,250,1)",
             paper_bgcolor="rgba(0,0,0,0)",
@@ -1428,7 +1487,7 @@ class MGSLettuceCalculator:
 
         # "Gutter travel →" label along the top
         fig.add_annotation(
-            x=total_days / 2,
+            x=total_width / 2,
             y=gutter_length_m * 1.15,
             text="Gutter travel direction →",
             showarrow=False,
@@ -1436,6 +1495,13 @@ class MGSLettuceCalculator:
         )
 
         st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Plant circle diameter uses crop age: week 1 = 1 in, week 2 = 2 in, week 3 = 3 in, etc."
+        )
+        if plants_drawn >= cls._MAX_PLANT_CIRCLES:
+            st.caption(
+                f"Display capped at {cls._MAX_PLANT_CIRCLES} plant circles for readability."
+            )
 
     @classmethod
     def render(cls):
