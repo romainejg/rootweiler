@@ -1297,7 +1297,7 @@ class MGSLettuceCalculator:
 
         d = spacing_m
         overlap_area = (
-            2.0 * radius * radius * math.acos(d / (2.0 * radius))
+            2.0 * radius * radius * math.acos(min(1.0, d / (2.0 * radius)))
             - 0.5 * d * math.sqrt(max(0.0, 4.0 * radius * radius - d * d))
         )
         circle_area = math.pi * radius * radius
@@ -1374,7 +1374,7 @@ class MGSLettuceCalculator:
             zone_exit_diameter_in = zone_exit_diameter_m / cls._INCH_TO_M
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
-            overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
+            max_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
             plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
@@ -1451,7 +1451,7 @@ class MGSLettuceCalculator:
                 f"{days:.0f} days<br>"
                 f"{seeds_per_m2:.1f} plants/m²<br>"
                 f"c-c: {zone_spacing_m * 100:.1f} cm | s-s: {seed_spacing_m * 100:.1f} cm<br>"
-                f"overlap score: {overlap_score_pct:.1f}%<br>"
+                f"overlap score: {max_overlap_pct:.1f}%<br>"
                 f"diameter: {zone_exit_diameter_in:.0f} in"
             )
             fig.add_annotation(
@@ -1728,7 +1728,7 @@ class MGSLettuceCalculator:
             diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, diameter_m)
-            overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
+            max_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
 
             total_weighted_density += seeds_per_m2 * days
             total_days += days
@@ -1745,7 +1745,7 @@ class MGSLettuceCalculator:
                     "Total plants/zone": int(round(total_seeds_zone)),
                     "C-C spacing (m)": round(zone_spacing_m, 3),
                     "S-S spacing (m)": round(seed_spacing_m, 3),
-                    "Canopy overlap score (%)": round(overlap_score_pct, 1),
+                    "Canopy overlap score (%)": round(max_overlap_pct, 1),
                     "Plants/m²": round(seeds_per_m2, 2),
                     "Plants/sqft": round(seeds_per_sqft, 3),
                 }
