@@ -1188,6 +1188,7 @@ class MGSLettuceCalculator:
     _UNITS = ["m", "cm", "ft", "in"]
     _SQM_TO_SQFT = 10.7639  # 1 m² = 10.7639 ft²
     _CFG_KEY = "mgs_density_cfg"
+    _MAX_GUTTER_LINES = 40  # max gutter lines drawn per zone to avoid overcrowding
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1300,7 +1301,7 @@ class MGSLettuceCalculator:
             st.info("Enter valid zone days and gutter length to see the layout.")
             return
 
-        # Colour palette (cycles if more zones than colours)
+        # Color palette (cycles if more zones than colors)
         palette = [
             "#4CAF50", "#2196F3", "#FF9800", "#9C27B0",
             "#F44336", "#00BCD4", "#8BC34A", "#FF5722",
@@ -1339,26 +1340,25 @@ class MGSLettuceCalculator:
                 line=dict(color=color, width=2),
             )
 
-            # Gutter lines inside the zone
+            # Gutter lines inside the zone.
             # Gutters run parallel to gutter length (vertical in diagram).
             # They are spaced by pitch_m along the X axis.
-            # We draw up to a reasonable max to avoid over-crowding.
-            max_gutter_lines = 40
+            # Cap at _MAX_GUTTER_LINES to avoid overcrowding.
             if pitch_m > 0:
                 num_gutters = zone_width / pitch_m
-                # Scale pitch to day-units for drawing
-                pitch_days = zone_width / num_gutters if num_gutters > 0 else zone_width
-                n_draw = min(int(num_gutters), max_gutter_lines)
-                for g in range(n_draw):
-                    gx = x_cursor + (g + 0.5) * pitch_days
-                    fig.add_shape(
-                        type="line",
-                        x0=gx,
-                        y0=0,
-                        x1=gx,
-                        y1=gutter_length_m,
-                        line=dict(color=color, width=1.2, dash="dot"),
-                    )
+                if num_gutters > 0:
+                    pitch_days = zone_width / num_gutters
+                    n_draw = min(int(num_gutters), cls._MAX_GUTTER_LINES)
+                    for g in range(n_draw):
+                        gx = x_cursor + (g + 0.5) * pitch_days
+                        fig.add_shape(
+                            type="line",
+                            x0=gx,
+                            y0=0,
+                            x1=gx,
+                            y1=gutter_length_m,
+                            line=dict(color=color, width=1.2, dash="dot"),
+                        )
 
             # Zone label annotation (centred in the zone rectangle)
             mid_x = x_cursor + zone_width / 2
@@ -1430,7 +1430,7 @@ class MGSLettuceCalculator:
         fig.add_annotation(
             x=total_days / 2,
             y=gutter_length_m * 1.15,
-            text="← Gutter travel direction →",
+            text="Gutter travel direction →",
             showarrow=False,
             font=dict(size=11, color="#555"),
         )
