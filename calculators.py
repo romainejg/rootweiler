@@ -1189,6 +1189,7 @@ class MGSLettuceCalculator:
     _CFG_KEY = "mgs_density_cfg"
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
     _INCH_TO_M = 0.0254
+    _DAYS_PER_INCH_GROWTH = 7.0  # crop diameter grows 1 inch per 7 days (linear)
     # Visual layout sizing constants used to convert data-unit diameters to marker pixels.
     # Figure height is set to 380 px with margins t=30, b=10 → ~340 px usable height.
     # The y data range spans gutter_length_m * 1.3 (range=[-0.1, 1.2] × gutter_length_m).
@@ -1325,7 +1326,7 @@ class MGSLettuceCalculator:
     @classmethod
     def _plant_diameter_m_from_day(cls, day_number: float) -> float:
         """Plant diameter in metres; linear by day (day 0 = 0 in, day 7 = 1 in, day 14 = 2 in)."""
-        diameter_in = max(0.0, day_number / 7.0)
+        diameter_in = max(0.0, day_number / cls._DAYS_PER_INCH_GROWTH)
         return diameter_in * cls._INCH_TO_M
 
     @classmethod
