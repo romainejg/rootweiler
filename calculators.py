@@ -1288,7 +1288,7 @@ class MGSLettuceCalculator:
         """Return crop week from day count (days 1-7 = week 1, etc.)."""
         if day_number <= 0:
             return 1
-        return max(1, int(np.ceil(day_number / 7.0)))
+        return int(np.ceil(day_number / 7.0))
 
     @classmethod
     def _plant_diameter_m_from_day(cls, day_number: float) -> float:
@@ -1336,7 +1336,7 @@ class MGSLettuceCalculator:
             if pitch_m > 0:
                 zone_pitches.append(pitch_m)
         day_scale_m = (
-            float(np.mean(zone_pitches))
+            np.mean(zone_pitches)
             if zone_pitches
             else max(gutter_width_m, cls._MIN_DAY_SCALE_M)
         )
@@ -1400,6 +1400,8 @@ class MGSLettuceCalculator:
             # Draw a capped count to keep rendering responsive.
             if gutter_centers and plants_drawn < cls._MAX_PLANT_CIRCLES:
                 plants_to_draw = min(plants_per_gutter, cls._MAX_PLANTS_PER_GUTTER)
+                if plants_to_draw <= 0:
+                    plants_to_draw = 1
                 y_step = gutter_length_m / plants_to_draw
                 radius = diameter_m / 2.0
 
