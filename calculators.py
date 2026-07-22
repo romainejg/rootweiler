@@ -1187,9 +1187,6 @@ class MGSLettuceCalculator:
     _UNITS = ["m", "cm", "ft", "in"]
     _SQM_TO_SQFT = 10.7639  # 1 m² = 10.7639 ft²
     _CFG_KEY = "mgs_density_cfg"
-    _MAX_GUTTER_LINES = 40  # cap visual gutter lines to keep the chart readable
-    _MAX_PLANTS_PER_GUTTER = 80  # cap plants per gutter for responsive rendering
-    _MAX_PLANT_CIRCLES = 2500  # cap total circles to avoid heavy Plotly payloads
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
     _INCH_TO_M = 0.0254
     # Visual layout sizing constants used to convert data-unit diameters to marker pixels.
@@ -1327,9 +1324,8 @@ class MGSLettuceCalculator:
 
     @classmethod
     def _plant_diameter_m_from_day(cls, day_number: float) -> float:
-        """Plant diameter in metres using weekly diameter schedule (week N = N inches)."""
-        week_num = cls._week_from_day(day_number)
-        diameter_in = float(week_num)
+        """Plant diameter in metres; linear by day (day 0 = 0 in, day 7 = 1 in, day 14 = 2 in)."""
+        diameter_in = max(0.0, day_number / 7.0)
         return diameter_in * cls._INCH_TO_M
 
     @classmethod
@@ -1372,7 +1368,6 @@ class MGSLettuceCalculator:
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
-        plants_drawn = 0
 
         for idx, zi in enumerate(zone_inputs):
             days = zi["days_in_zone"]
@@ -1413,8 +1408,8 @@ class MGSLettuceCalculator:
 
             gutter_centers = []
 
-            # Gutter rectangles inside the zone (capped to avoid overcrowding).
-            n_draw = min(gutters_per_zone, cls._MAX_GUTTER_LINES)
+            # Gutter rectangles inside the zone.
+            n_draw = gutters_per_zone
             gutter_step = zone_spacing_m if n_draw > 1 else 0.0
             first_center_x = x_cursor + gutter_width_m / 2.0
             if n_draw > 1:
@@ -1442,8 +1437,8 @@ class MGSLettuceCalculator:
             # Plant positions — one Scatter trace per zone instead of one shape
             # per circle.  This is orders of magnitude faster for large plant counts
             # because Plotly renders a single SVG element for the whole trace.
-            if gutter_centers and plants_drawn < cls._MAX_PLANT_CIRCLES:
-                plants_to_draw = max(1, min(plants_per_gutter, cls._MAX_PLANTS_PER_GUTTER))
+            if gutter_centers:
+                plants_to_draw = max(1, plants_per_gutter)
                 y_step = gutter_length_m / plants_to_draw
 
                 scatter_x: list = []
@@ -1453,14 +1448,9 @@ class MGSLettuceCalculator:
                 for gx, gutter_diameter_m in gutter_centers:
                     size_px = max(cls._MIN_MARKER_SIZE_PX, gutter_diameter_m * px_per_m)
                     for p in range(plants_to_draw):
-                        if plants_drawn >= cls._MAX_PLANT_CIRCLES:
-                            break
                         scatter_x.append(gx)
                         scatter_y.append((p + 0.5) * y_step)
                         scatter_size.append(size_px)
-                        plants_drawn += 1
-                    if plants_drawn >= cls._MAX_PLANT_CIRCLES:
-                        break
 
                 if scatter_x:
                     fig.add_trace(
@@ -1566,14 +1556,10 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circles represent crop diameter using the weekly schedule (+1 inch per week). "
-            "Week 1 (days 1-7) = 1 inch diameter, Week 2 (days 8-14) = 2 inches. "
+            "Plant circles represent crop diameter growing linearly by day: "
+            "day 0 = 0 in, day 7 = 1 in, day 14 = 2 in, etc. "
             "Gutter rectangles reflect actual gutter width."
         )
-        if plants_drawn >= cls._MAX_PLANT_CIRCLES:
-            st.caption(
-                f"Display capped at {cls._MAX_PLANT_CIRCLES} plant circles for readability."
-            )
 
     @classmethod
     def render(cls):
