@@ -1192,6 +1192,12 @@ class MGSLettuceCalculator:
     _MAX_PLANT_CIRCLES = 2500  # cap total circles to avoid heavy Plotly payloads
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
     _INCH_TO_M = 0.0254
+    # Visual layout sizing constants used to convert data-unit diameters to marker pixels.
+    # Figure height is set to 380 px with margins t=30, b=10 → ~340 px usable height.
+    # The y data range spans gutter_length_m * 1.3 (range=[-0.1, 1.2] × gutter_length_m).
+    _VIS_EFF_HEIGHT_PX = 340.0
+    _VIS_Y_RANGE_FACTOR = 1.3
+    _MIN_MARKER_SIZE_PX = 4.0  # smallest marker diameter (px) for plant circle traces
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1341,6 +1347,10 @@ class MGSLettuceCalculator:
         - Y axis  → gutter length direction
         - Vertical gutter rectangles reflect gutter width and c-c spacing
         - Circles on gutters represent plant position and diameter by week
+
+        Performance note: plant positions are rendered as a single Scatter trace
+        per zone (marker symbols) rather than one shape per circle, which is
+        dramatically faster for large plant counts.
         """
         if gutter_length_m <= 0 or gutter_width_m <= 0:
             st.info("Enter valid gutter dimensions to see the layout.")
@@ -1354,6 +1364,11 @@ class MGSLettuceCalculator:
         ]
 
         fig = go.Figure()
+
+        # Estimate pixel-to-metre ratio for marker sizing.
+        # See class constants _VIS_EFF_HEIGHT_PX and _VIS_Y_RANGE_FACTOR for details.
+        _y_data_range = gutter_length_m * cls._VIS_Y_RANGE_FACTOR
+        px_per_m = cls._VIS_EFF_HEIGHT_PX / _y_data_range if _y_data_range > 0 else 100.0
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
@@ -1424,30 +1439,48 @@ class MGSLettuceCalculator:
                     fillcolor="rgba(255,255,255,0.25)",
                 )
 
-            # Plant circles on each gutter, with diameter based on crop week.
-            # Draw a capped count to keep rendering responsive.
+            # Plant positions — one Scatter trace per zone instead of one shape
+            # per circle.  This is orders of magnitude faster for large plant counts
+            # because Plotly renders a single SVG element for the whole trace.
             if gutter_centers and plants_drawn < cls._MAX_PLANT_CIRCLES:
                 plants_to_draw = max(1, min(plants_per_gutter, cls._MAX_PLANTS_PER_GUTTER))
                 y_step = gutter_length_m / plants_to_draw
 
+                scatter_x: list = []
+                scatter_y: list = []
+                scatter_size: list = []
+
                 for gx, gutter_diameter_m in gutter_centers:
-                    radius = gutter_diameter_m / 2.0
+                    size_px = max(cls._MIN_MARKER_SIZE_PX, gutter_diameter_m * px_per_m)
                     for p in range(plants_to_draw):
                         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
                             break
-                        gy = (p + 0.5) * y_step
-                        fig.add_shape(
-                            type="circle",
-                            x0=gx - radius,
-                            y0=gy - radius,
-                            x1=gx + radius,
-                            y1=gy + radius,
-                            line=dict(color=color, width=1.0),
-                            fillcolor="rgba(255,255,255,0.15)",
-                        )
+                        scatter_x.append(gx)
+                        scatter_y.append((p + 0.5) * y_step)
+                        scatter_size.append(size_px)
                         plants_drawn += 1
                     if plants_drawn >= cls._MAX_PLANT_CIRCLES:
                         break
+
+                if scatter_x:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=scatter_x,
+                            y=scatter_y,
+                            mode="markers",
+                            marker=dict(
+                                symbol="circle-open",
+                                size=scatter_size,
+                                sizemode="diameter",
+                                color=color,
+                                opacity=0.7,
+                                line=dict(color=color, width=1),
+                            ),
+                            hoverinfo="skip",
+                            showlegend=False,
+                            name=name,
+                        )
+                    )
 
             # Zone label annotation (centred in the zone rectangle)
             mid_x = x_cursor + zone_width / 2
@@ -1603,6 +1636,31 @@ class MGSLettuceCalculator:
             )
             cfg["gutter_width_unit"] = gutter_width_unit
 
+        # Optional total-gutters system input
+        use_total_gutters = st.checkbox(
+            "Set total gutters for system",
+            value=cfg.get("use_total_gutters", False),
+            key="mgs_use_total_gutters",
+            help=(
+                "When enabled, enter the total number of gutters in the system. "
+                "Gutters per zone are then derived automatically as "
+                "total_gutters × (days_in_zone / total_cycle_days)."
+            ),
+        )
+        cfg["use_total_gutters"] = use_total_gutters
+
+        total_gutters_system = 0
+        if use_total_gutters:
+            total_gutters_system = st.number_input(
+                "Total gutters in system",
+                min_value=1,
+                value=int(cfg.get("total_gutters_system", 100)),
+                step=1,
+                key="mgs_total_gutters_system",
+                help="Total gutters across all zones. Gutters/zone will be derived proportionally.",
+            )
+            cfg["total_gutters_system"] = int(total_gutters_system)
+
         st.markdown("---")
         st.markdown("#### Zone configuration")
 
@@ -1616,9 +1674,21 @@ class MGSLettuceCalculator:
         )
         cfg["num_zones"] = int(num_zones)
 
+        # Pre-compute total days from saved zone configs (used to derive gutters/zone
+        # proportionally when total_gutters mode is active).
+        zones_cfg = cfg.setdefault("zones", [])
+        pre_total_days = (
+            sum(
+                zones_cfg[i].get("days_in_zone", 7.0)
+                for i in range(int(num_zones))
+                if i < len(zones_cfg)
+            )
+            if use_total_gutters
+            else 0.0
+        )
+
         # Collect per-zone inputs
         zone_inputs = []
-        zones_cfg = cfg.setdefault("zones", [])
         for i in range(int(num_zones)):
             # Grow the saved zones list as needed
             while len(zones_cfg) <= i:
@@ -1655,13 +1725,30 @@ class MGSLettuceCalculator:
                 )
                 zc["seeds_per_gutter"] = zone_seeds_per_gutter
             with zc4:
-                gutters_per_zone = st.number_input(
-                    "Gutters/zone",
-                    min_value=1,
-                    value=int(zc.get("gutters_per_zone", 30)),
-                    step=1,
-                    key=f"mgs_gutters_per_zone_{i}",
-                )
+                if use_total_gutters and pre_total_days > 0:
+                    # Derive gutters/zone proportionally from total gutters and days
+                    computed_gpz = max(
+                        1,
+                        int(round(total_gutters_system * days_in_zone / pre_total_days)),
+                    )
+                    gutters_per_zone = computed_gpz
+                    st.number_input(
+                        "Gutters/zone (derived)",
+                        min_value=1,
+                        value=gutters_per_zone,
+                        step=1,
+                        key=f"mgs_gutters_per_zone_{i}",
+                        disabled=True,
+                        help="Computed as total_gutters × (days_in_zone / total_cycle_days).",
+                    )
+                else:
+                    gutters_per_zone = st.number_input(
+                        "Gutters/zone",
+                        min_value=1,
+                        value=int(zc.get("gutters_per_zone", 30)),
+                        step=1,
+                        key=f"mgs_gutters_per_zone_{i}",
+                    )
                 zc["gutters_per_zone"] = int(gutters_per_zone)
             with zc5:
                 zone_spacing_val = st.number_input(
@@ -1692,6 +1779,18 @@ class MGSLettuceCalculator:
                     "spacing_unit": zone_spacing_unit,
                 }
             )
+
+        # If total-gutters mode is active, recompute gutters/zone using the
+        # actual days collected in this render pass (so the first-render lag
+        # from pre_total_days is corrected immediately on re-render).
+        if use_total_gutters and total_gutters_system > 0:
+            actual_total_days = sum(zi["days_in_zone"] for zi in zone_inputs)
+            if actual_total_days > 0:
+                for zi in zone_inputs:
+                    zi["gutters_per_zone"] = max(
+                        1,
+                        int(round(total_gutters_system * zi["days_in_zone"] / actual_total_days)),
+                    )
 
         # Trim stale zone entries when the user reduces the zone count
         del zones_cfg[int(num_zones):]
@@ -1790,7 +1889,8 @@ class MGSLettuceCalculator:
             cfg["computed_avg_density_m2"] = overall_avg_m2
 
             st.markdown("### Overall time-weighted average density")
-            res_col1, res_col2, res_col3, res_col4 = st.columns(4)
+            cycles_per_year = 365.0 / total_days
+            res_col1, res_col2, res_col3, res_col4, res_col5 = st.columns(5)
             with res_col1:
                 st.metric("Plants/m²", f"{overall_avg_m2:.2f}")
             with res_col2:
@@ -1799,6 +1899,8 @@ class MGSLettuceCalculator:
                 st.metric("Avg C-C spacing (m)", f"{avg_cc_spacing_m:.3f}")
             with res_col4:
                 st.metric("Avg S-S spacing (m)", f"{avg_ss_spacing_m:.3f}")
+            with res_col5:
+                st.metric("Cycles/year", f"{cycles_per_year:.2f}")
 
             with st.expander("Show system details", expanded=False):
                 st.write(f"Gutter length (m): `{gutter_length_m:.3f}`")
