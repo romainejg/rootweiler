@@ -1192,6 +1192,7 @@ class MGSLettuceCalculator:
     _MAX_PLANTS_PER_GUTTER = 80
     _MAX_PLANT_CIRCLES = 2500
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
+    _INCH_TO_M = 0.0254
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1290,11 +1291,11 @@ class MGSLettuceCalculator:
         return max(1, int(np.ceil(day_number / 7.0)))
 
     @classmethod
-    def _diameter_m_from_day(cls, day_number: float) -> float:
+    def _plant_diameter_m_from_day(cls, day_number: float) -> float:
         """Plant diameter in metres using 1 in/week growth (week N = N inches)."""
         week_num = cls._week_from_day(day_number)
         diameter_in = float(week_num)
-        return diameter_in * 0.0254
+        return diameter_in * cls._INCH_TO_M
 
     @classmethod
     def _render_system_visual(
@@ -1359,8 +1360,8 @@ class MGSLettuceCalculator:
             color = palette[idx % len(palette)]
             name = zi["name"]
             day_mid = cumulative_day + (days / 2.0)
-            diameter_m = cls._diameter_m_from_day(day_mid)
-            diameter_in = diameter_m / 0.0254
+            diameter_m = cls._plant_diameter_m_from_day(day_mid)
+            diameter_in = diameter_m / cls._INCH_TO_M
             plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
@@ -1503,7 +1504,7 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circle diameter uses crop age: week 1 = 1 inch, week 2 = 2 inches, week 3 = 3 inches, etc."
+            "Plant circles show size based on crop age: week 1 = 1 inch, week 2 = 2 inches, week 3 = 3 inches, etc."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
