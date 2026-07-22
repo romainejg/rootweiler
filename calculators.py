@@ -1296,6 +1296,8 @@ class MGSLettuceCalculator:
         if spacing_m >= diameter_m:
             return 0.0
         radius = diameter_m / 2.0
+        if radius <= 0:
+            return 0.0
 
         d = spacing_m
         # Equal-circle lens overlap area formula.
@@ -1377,7 +1379,7 @@ class MGSLettuceCalculator:
             zone_exit_diameter_in = zone_exit_diameter_m / cls._INCH_TO_M
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
-            canopy_overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
+            max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
             plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
@@ -1454,7 +1456,7 @@ class MGSLettuceCalculator:
                 f"{days:.0f} days<br>"
                 f"{seeds_per_m2:.1f} plants/m²<br>"
                 f"c-c: {zone_spacing_m * 100:.1f} cm | s-s: {seed_spacing_m * 100:.1f} cm<br>"
-                f"overlap score: {canopy_overlap_score_pct:.1f}%<br>"
+                f"overlap score: {max_canopy_overlap_pct:.1f}%<br>"
                 f"diameter: {zone_exit_diameter_in:.0f} in"
             )
             fig.add_annotation(
@@ -1530,7 +1532,8 @@ class MGSLettuceCalculator:
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             "Plant circles represent crop diameter using the weekly schedule (+1 inch per week). "
-            "Week 1 corresponds to days 1-7. Gutter rectangles reflect actual gutter width."
+            "Week 1 (days 1-7) = 1 inch diameter, Week 2 (days 8-14) = 2 inches. "
+            "Gutter rectangles reflect actual gutter width."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
@@ -1731,7 +1734,7 @@ class MGSLettuceCalculator:
             diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, diameter_m)
-            canopy_overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
+            max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
 
             total_weighted_density += seeds_per_m2 * days
             total_days += days
@@ -1748,7 +1751,7 @@ class MGSLettuceCalculator:
                     "Total plants/zone": int(round(total_seeds_zone)),
                     "C-C spacing (m)": round(zone_spacing_m, 3),
                     "S-S spacing (m)": round(seed_spacing_m, 3),
-                    "Canopy overlap score (%)": round(canopy_overlap_score_pct, 1),
+                    "Canopy overlap score (%)": round(max_canopy_overlap_pct, 1),
                     "Plants/m²": round(seeds_per_m2, 2),
                     "Plants/sqft": round(seeds_per_sqft, 3),
                 }
