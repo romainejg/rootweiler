@@ -1289,8 +1289,10 @@ class MGSLettuceCalculator:
     @staticmethod
     def _pair_overlap_pct(spacing_m: float, diameter_m: float) -> float:
         """Overlap area (% of a single circle area) for two equal circles."""
-        if spacing_m <= 0 or diameter_m <= 0:
+        if diameter_m <= 0:
             return 0.0
+        if spacing_m <= 0:
+            return 100.0
         if spacing_m >= diameter_m:
             return 0.0
         radius = diameter_m / 2.0
@@ -1374,7 +1376,7 @@ class MGSLettuceCalculator:
             zone_exit_diameter_in = zone_exit_diameter_m / cls._INCH_TO_M
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
-            max_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
+            canopy_overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
             plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
@@ -1451,7 +1453,7 @@ class MGSLettuceCalculator:
                 f"{days:.0f} days<br>"
                 f"{seeds_per_m2:.1f} plants/m²<br>"
                 f"c-c: {zone_spacing_m * 100:.1f} cm | s-s: {seed_spacing_m * 100:.1f} cm<br>"
-                f"overlap score: {max_overlap_pct:.1f}%<br>"
+                f"overlap score: {canopy_overlap_score_pct:.1f}%<br>"
                 f"diameter: {zone_exit_diameter_in:.0f} in"
             )
             fig.add_annotation(
@@ -1527,7 +1529,7 @@ class MGSLettuceCalculator:
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             "Plant circles represent crop diameter using the weekly schedule (+1 inch per week). "
-            "Gutter rectangles reflect actual gutter width."
+            "Week 1 starts at day 1. Gutter rectangles reflect actual gutter width."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
@@ -1661,7 +1663,7 @@ class MGSLettuceCalculator:
                     min_value=0.0,
                     value=zc.get("spacing_val", 20.0),
                     step=1.0,
-                    help="Center-to-center spacing between gutters.",
+                    help="center-to-center spacing between gutters.",
                     key=f"mgs_zone_spacing_val_{i}",
                 )
                 zc["spacing_val"] = zone_spacing_val
@@ -1728,7 +1730,7 @@ class MGSLettuceCalculator:
             diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, diameter_m)
-            max_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
+            canopy_overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
 
             total_weighted_density += seeds_per_m2 * days
             total_days += days
@@ -1745,7 +1747,7 @@ class MGSLettuceCalculator:
                     "Total plants/zone": int(round(total_seeds_zone)),
                     "C-C spacing (m)": round(zone_spacing_m, 3),
                     "S-S spacing (m)": round(seed_spacing_m, 3),
-                    "Canopy overlap score (%)": round(max_overlap_pct, 1),
+                    "Canopy overlap score (%)": round(canopy_overlap_score_pct, 1),
                     "Plants/m²": round(seeds_per_m2, 2),
                     "Plants/sqft": round(seeds_per_sqft, 3),
                 }
