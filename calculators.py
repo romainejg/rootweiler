@@ -1289,7 +1289,7 @@ class MGSLettuceCalculator:
     @staticmethod
     def _pair_overlap_pct(spacing_m: float, diameter_m: float) -> float:
         """Overlap area (% of a single circle area) for two equal circles."""
-        if diameter_m <= 1e-9:
+        if diameter_m <= 0:
             return 0.0
         if spacing_m <= 0:
             return 100.0
@@ -1298,6 +1298,7 @@ class MGSLettuceCalculator:
         radius = diameter_m / 2.0
 
         d = spacing_m
+        # Equal-circle lens overlap area formula.
         overlap_area = (
             2.0 * radius * radius * math.acos(min(1.0, d / (2.0 * radius)))
             - 0.5 * d * math.sqrt(max(0.0, 4.0 * radius * radius - d * d))
@@ -1529,7 +1530,7 @@ class MGSLettuceCalculator:
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             "Plant circles represent crop diameter using the weekly schedule (+1 inch per week). "
-            "Week count starts at day 1 (days 1-7 = week 1). Gutter rectangles reflect actual gutter width."
+            "Week 1 corresponds to days 1-7. Gutter rectangles reflect actual gutter width."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
