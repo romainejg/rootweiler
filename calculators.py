@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import math
 import canopy_closure as cc
 
 
@@ -1177,12 +1178,10 @@ class MGSLettuceCalculator:
     - Zone spacing   (gap between gutters, m, cm, ft, or in)
 
     Formulae:
-    - Footprint area per gutter = gutter_length × (gutter_width + zone_spacing)
+    - Footprint area per gutter = gutter_length × zone_spacing(c-c)
     - Seeds per m² (per zone)   = seeds_per_gutter / footprint_area_per_gutter
-    - Gutters per zone          = zone_length / (gutter_width + zone_spacing)
-    - Total seeds per zone      = seeds_per_gutter × gutters_per_zone
-    - Zone area                 = gutter_length × zone_length
-    - Overall avg seeds/m²      = Σ(total_seeds) / Σ(zone_area)
+    - Seed-to-seed spacing (s-s)= gutter_length / seeds_per_gutter
+    - Overall avg seeds/m²      = Σ(seeds_per_m² × days_in_zone) / Σ(days_in_zone)
     """
 
     _UNITS = ["m", "cm", "ft", "in"]
@@ -1220,25 +1219,30 @@ class MGSLettuceCalculator:
     @staticmethod
     def compute_seeds_per_m2(
         gutter_length_m: float,
-        gutter_width_m: float,
         spacing_m: float,
         seeds_per_gutter: float,
     ) -> float:
         """
         Compute seeds/m² from gutter geometry and seeding rate.
 
-        footprint_area = gutter_length × (gutter_width + spacing)
+        footprint_area = gutter_length × spacing(c-c)
         seeds_per_m²   = seeds_per_gutter / footprint_area
         """
         if gutter_length_m <= 0 or seeds_per_gutter <= 0:
             return 0.0
-        pitch_m = gutter_width_m + spacing_m
-        if pitch_m <= 0:
+        if spacing_m <= 0:
             return 0.0
-        area_m2 = gutter_length_m * pitch_m
+        area_m2 = gutter_length_m * spacing_m
         if area_m2 <= 0:
             return 0.0
         return seeds_per_gutter / area_m2
+
+    @staticmethod
+    def compute_seed_spacing_m(gutter_length_m: float, seeds_per_gutter: float) -> float:
+        """Compute seed-to-seed center spacing along a gutter."""
+        if gutter_length_m <= 0 or seeds_per_gutter <= 0:
+            return 0.0
+        return gutter_length_m / seeds_per_gutter
 
     @classmethod
     def compute_zone_stats(
@@ -1259,8 +1263,7 @@ class MGSLettuceCalculator:
         - seeds_per_m2     (float)
         - seeds_per_sqft   (float)
         """
-        pitch_m = gutter_width_m + zone_spacing_m
-        if pitch_m <= 0 or gutter_length_m <= 0 or zone_length_m <= 0:
+        if zone_spacing_m <= 0 or gutter_length_m <= 0 or zone_length_m <= 0:
             return {
                 "gutters_in_zone": 0.0,
                 "total_seeds": 0.0,
@@ -1269,7 +1272,7 @@ class MGSLettuceCalculator:
                 "seeds_per_sqft": 0.0,
             }
 
-        gutters_in_zone = zone_length_m / pitch_m
+        gutters_in_zone = zone_length_m / zone_spacing_m
         total_seeds = seeds_per_gutter * gutters_in_zone
         zone_area_m2 = gutter_length_m * zone_length_m
         seeds_per_m2 = total_seeds / zone_area_m2 if zone_area_m2 > 0 else 0.0
@@ -1282,6 +1285,25 @@ class MGSLettuceCalculator:
             "seeds_per_m2": seeds_per_m2,
             "seeds_per_sqft": seeds_per_sqft,
         }
+
+    @staticmethod
+    def _pair_overlap_pct(spacing_m: float, diameter_m: float) -> float:
+        """Overlap area (% of a single circle area) for two equal circles."""
+        if spacing_m <= 0 or diameter_m <= 0:
+            return 0.0
+        radius = diameter_m / 2.0
+        if spacing_m >= (2.0 * radius):
+            return 0.0
+
+        d = spacing_m
+        overlap_area = (
+            2.0 * radius * radius * math.acos(d / (2.0 * radius))
+            - 0.5 * d * math.sqrt(max(0.0, 4.0 * radius * radius - d * d))
+        )
+        circle_area = math.pi * radius * radius
+        if circle_area <= 0:
+            return 0.0
+        return max(0.0, min(100.0, (overlap_area / circle_area) * 100.0))
 
     @staticmethod
     def _week_from_day(day_number: float) -> int:
@@ -1308,14 +1330,13 @@ class MGSLettuceCalculator:
         Render a top-down Plotly diagram of the MGS system.
 
         Layout convention:
-        - X axis  → relative zone width (scaled from time in zone)
+        - X axis  → physical zone width (metres)
         - Y axis  → gutter length direction
-        - Dotted vertical lines represent individual gutters
+        - Vertical gutter rectangles reflect gutter width and c-c spacing
         - Circles on gutters represent plant position and diameter by week
         """
-        total_days = sum(zi["days_in_zone"] for zi in zone_inputs)
-        if total_days <= 0 or gutter_length_m <= 0:
-            st.info("Enter valid zone days and gutter length to see the layout.")
+        if gutter_length_m <= 0 or gutter_width_m <= 0:
+            st.info("Enter valid gutter dimensions to see the layout.")
             return
 
         # Color palette (cycles if more zones than colors)
@@ -1327,20 +1348,6 @@ class MGSLettuceCalculator:
 
         fig = go.Figure()
 
-        # Use a fixed metres/day scale so gutter pitch and plant diameters are visualized
-        # in the same axis units. This keeps spacing vs plant size comparisons intuitive.
-        zone_pitches = []
-        for zi in zone_inputs:
-            zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
-            pitch_m = gutter_width_m + zone_spacing_m
-            if pitch_m > 0:
-                zone_pitches.append(pitch_m)
-        day_scale_m = (
-            np.mean(zone_pitches)
-            if zone_pitches
-            else cls._MIN_DAY_SCALE_M
-        )
-
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
         plants_drawn = 0
@@ -1351,17 +1358,23 @@ class MGSLettuceCalculator:
                 continue
 
             zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
-            pitch_m = gutter_width_m + zone_spacing_m
+            gutters_per_zone = max(1, int(round(zi["gutters_per_zone"])))
             seeds_per_m2 = cls.compute_seeds_per_m2(
-                gutter_length_m, gutter_width_m, zone_spacing_m, zi["seeds_per_gutter"]
+                gutter_length_m, zone_spacing_m, zi["seeds_per_gutter"]
+            )
+            seed_spacing_m = cls.compute_seed_spacing_m(
+                gutter_length_m, zi["seeds_per_gutter"]
             )
 
-            zone_width = days * day_scale_m  # proportional to days, in metre-like display units
+            zone_width = gutter_width_m + max(0, gutters_per_zone - 1) * zone_spacing_m
             color = palette[idx % len(palette)]
             name = zi["name"]
             zone_exit_day = cumulative_day + days
             zone_exit_diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
             zone_exit_diameter_in = zone_exit_diameter_m / cls._INCH_TO_M
+            overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
+            overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
+            overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
             plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
@@ -1378,27 +1391,31 @@ class MGSLettuceCalculator:
 
             gutter_centers = []
 
-            # Gutter lines inside the zone (capped to avoid overcrowding).
-            if pitch_m > 0:
-                # zone_width is in display metres (days × m/day), so dividing by pitch_m
-                # gives a relative gutter count in the same display frame.
-                num_gutters = max(1, int(round(zone_width / pitch_m)))
-                n_draw = min(num_gutters, cls._MAX_GUTTER_LINES)
-                gutter_step = zone_width / n_draw if n_draw > 0 else zone_width
+            # Gutter rectangles inside the zone (capped to avoid overcrowding).
+            n_draw = min(gutters_per_zone, cls._MAX_GUTTER_LINES)
+            gutter_step = zone_spacing_m if n_draw > 1 else 0.0
+            first_center_x = x_cursor + gutter_width_m / 2.0
+            if n_draw > 1:
+                max_render_width = gutter_width_m + (n_draw - 1) * gutter_step
+                if max_render_width > zone_width and max_render_width > 0:
+                    compression = zone_width / max_render_width
+                    gutter_step *= compression
+                    first_center_x = x_cursor + (gutter_width_m * compression) / 2.0
 
-                for g in range(n_draw):
-                    gx = x_cursor + (g + 0.5) * gutter_step
-                    day_at_gutter = cumulative_day + ((g + 0.5) / n_draw) * days
-                    gutter_diameter_m = cls._plant_diameter_m_from_day(day_at_gutter)
-                    gutter_centers.append((gx, gutter_diameter_m))
-                    fig.add_shape(
-                        type="line",
-                        x0=gx,
-                        y0=0,
-                        x1=gx,
-                        y1=gutter_length_m,
-                        line=dict(color=color, width=1.2, dash="dot"),
-                    )
+            for g in range(n_draw):
+                gx = first_center_x + (g * gutter_step)
+                day_at_gutter = cumulative_day + ((g + 0.5) / max(1, n_draw)) * days
+                gutter_diameter_m = cls._plant_diameter_m_from_day(day_at_gutter)
+                gutter_centers.append((gx, gutter_diameter_m))
+                fig.add_shape(
+                    type="rect",
+                    x0=gx - gutter_width_m / 2.0,
+                    y0=0,
+                    x1=gx + gutter_width_m / 2.0,
+                    y1=gutter_length_m,
+                    line=dict(color=color, width=1.0),
+                    fillcolor="rgba(255,255,255,0.25)",
+                )
 
             # Plant circles on each gutter, with diameter based on crop week.
             # Draw a capped count to keep rendering responsive.
@@ -1433,7 +1450,8 @@ class MGSLettuceCalculator:
                 f"<b>{name}</b><br>"
                 f"{days:.0f} days<br>"
                 f"{seeds_per_m2:.1f} plants/m²<br>"
-                f"spacing: {zone_spacing_m * 100:.1f} cm<br>"
+                f"c-c: {zone_spacing_m * 100:.1f} cm | s-s: {seed_spacing_m * 100:.1f} cm<br>"
+                f"overlap score: {overlap_score_pct:.1f}%<br>"
                 f"diameter: {zone_exit_diameter_in:.0f} in"
             )
             fig.add_annotation(
@@ -1473,7 +1491,7 @@ class MGSLettuceCalculator:
         # Axis labels & styling
         fig.update_layout(
             xaxis=dict(
-                title=f"Relative zone width (scaled by {day_scale_m:.2f} m/day)",
+                title="System width (m)",
                 showticklabels=False,
                 showgrid=False,
                 zeroline=False,
@@ -1486,7 +1504,7 @@ class MGSLettuceCalculator:
                 zeroline=False,
                 range=[-gutter_length_m * 0.1, gutter_length_m * 1.2],
                 # Keep x and y in a 1:1 data-unit scale so plant diameters and
-                # gutter spacing are visually comparable in metre-like units.
+                # gutter spacing are visually comparable in metre units.
                 scaleanchor="x",
                 scaleratio=1,
             ),
@@ -1508,7 +1526,7 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circles represent crop diameter using the weekly schedule (+1 inch per week)."
+            "Plant circles represent crop diameter using the weekly schedule (+1 inch per week); gutter rectangles reflect actual gutter width."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
@@ -1526,7 +1544,7 @@ class MGSLettuceCalculator:
 
             Enter the fixed system dimensions once, then configure each zone
             with the number of **days plants spend in that zone** and the
-            gutter-to-gutter spacing.  
+            **gutter center-to-center spacing (c-c)**.  
             Results show per-zone density and an overall **time-weighted average**.
             """
         )
@@ -1599,7 +1617,7 @@ class MGSLettuceCalculator:
             zc = zones_cfg[i]
 
             st.markdown(f"**Zone {i + 1}**")
-            zc1, zc2, zc3, zc4, zc5 = st.columns([2, 2, 2, 2, 1])
+            zc1, zc2, zc3, zc4, zc5, zc6 = st.columns([2, 2, 2, 2, 1.5, 1])
             with zc1:
                 zone_name = st.text_input(
                     "Zone name",
@@ -1628,15 +1646,25 @@ class MGSLettuceCalculator:
                 )
                 zc["seeds_per_gutter"] = zone_seeds_per_gutter
             with zc4:
+                gutters_per_zone = st.number_input(
+                    "Gutters/zone",
+                    min_value=1,
+                    value=int(zc.get("gutters_per_zone", 30)),
+                    step=1,
+                    key=f"mgs_gutters_per_zone_{i}",
+                )
+                zc["gutters_per_zone"] = int(gutters_per_zone)
+            with zc5:
                 zone_spacing_val = st.number_input(
-                    "Zone spacing",
+                    "Zone spacing (c-c)",
                     min_value=0.0,
                     value=zc.get("spacing_val", 20.0),
                     step=1.0,
+                    help="Center-to-center spacing between gutters.",
                     key=f"mgs_zone_spacing_val_{i}",
                 )
                 zc["spacing_val"] = zone_spacing_val
-            with zc5:
+            with zc6:
                 _sp_unit = zc.get("spacing_unit", "cm")
                 zone_spacing_unit = st.selectbox(
                     "Unit",
@@ -1650,6 +1678,7 @@ class MGSLettuceCalculator:
                     "name": zone_name,
                     "days_in_zone": days_in_zone,
                     "seeds_per_gutter": zone_seeds_per_gutter,
+                    "gutters_per_zone": int(gutters_per_zone),
                     "spacing_val": zone_spacing_val,
                     "spacing_unit": zone_spacing_unit,
                 }
@@ -1676,29 +1705,46 @@ class MGSLettuceCalculator:
         rows = []
         total_weighted_density = 0.0
         total_days = 0.0
+        cumulative_day = 0.0
+        weighted_cc_spacing = 0.0
+        weighted_ss_spacing = 0.0
 
         for zi in zone_inputs:
             zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
             days = zi["days_in_zone"]
             zone_seeds = zi["seeds_per_gutter"]
+            gutters_per_zone = max(1, int(round(zi["gutters_per_zone"])))
+            seed_spacing_m = cls.compute_seed_spacing_m(gutter_length_m, zone_seeds)
 
             seeds_per_m2 = cls.compute_seeds_per_m2(
                 gutter_length_m,
-                gutter_width_m,
                 zone_spacing_m,
                 zone_seeds,
             )
             seeds_per_sqft = seeds_per_m2 / cls._SQM_TO_SQFT
+            total_seeds_zone = zone_seeds * gutters_per_zone
+            zone_exit_day = cumulative_day + max(0.0, days)
+            diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
+            overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, diameter_m)
+            overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, diameter_m)
+            overlap_score_pct = max(overlap_cc_pct, overlap_ss_pct)
 
             total_weighted_density += seeds_per_m2 * days
             total_days += days
+            weighted_cc_spacing += zone_spacing_m * days
+            weighted_ss_spacing += seed_spacing_m * days
+            cumulative_day += max(0.0, days)
 
             rows.append(
                 {
                     "Zone": zi["name"],
                     "Days in zone": round(days, 1),
                     "Seeds/plants per gutter": int(zone_seeds),
-                    "Spacing (m)": round(zone_spacing_m, 3),
+                    "Gutters/zone": gutters_per_zone,
+                    "Total plants/zone": int(round(total_seeds_zone)),
+                    "C-C spacing (m)": round(zone_spacing_m, 3),
+                    "S-S spacing (m)": round(seed_spacing_m, 3),
+                    "Canopy overlap score (%)": round(overlap_score_pct, 1),
                     "Plants/m²": round(seeds_per_m2, 2),
                     "Plants/sqft": round(seeds_per_sqft, 3),
                 }
@@ -1710,32 +1756,43 @@ class MGSLettuceCalculator:
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-        # System visualization
+        # System visualization (manual trigger)
         if rows:
             st.markdown("### System layout")
-            cls._render_system_visual(
-                zone_inputs, gutter_length_m, gutter_width_m
-            )
+            if st.button("Generate system layout visual", key="mgs_generate_layout"):
+                st.session_state["mgs_show_layout"] = True
+            if st.session_state.get("mgs_show_layout", False):
+                cls._render_system_visual(
+                    zone_inputs, gutter_length_m, gutter_width_m
+                )
 
         # Overall time-weighted average density
         if total_days > 0:
             overall_avg_m2 = total_weighted_density / total_days
             overall_avg_sqft = overall_avg_m2 / cls._SQM_TO_SQFT
+            avg_cc_spacing_m = weighted_cc_spacing / total_days
+            avg_ss_spacing_m = weighted_ss_spacing / total_days
 
             # Store for use by the Annualized Yield Calculator
             cfg["computed_avg_density_m2"] = overall_avg_m2
 
             st.markdown("### Overall time-weighted average density")
-            res_col1, res_col2 = st.columns(2)
+            res_col1, res_col2, res_col3, res_col4 = st.columns(4)
             with res_col1:
                 st.metric("Plants/m²", f"{overall_avg_m2:.2f}")
             with res_col2:
                 st.metric("Plants/sqft", f"{overall_avg_sqft:.3f}")
+            with res_col3:
+                st.metric("Avg C-C spacing (m)", f"{avg_cc_spacing_m:.3f}")
+            with res_col4:
+                st.metric("Avg S-S spacing (m)", f"{avg_ss_spacing_m:.3f}")
 
             with st.expander("Show system details", expanded=False):
                 st.write(f"Gutter length (m): `{gutter_length_m:.3f}`")
                 st.write(f"Gutter width (m): `{gutter_width_m:.3f}`")
                 st.write(f"Total days across all zones: `{total_days:.1f}`")
+                st.write(f"Avg c-c spacing (m): `{avg_cc_spacing_m:.3f}`")
+                st.write(f"Avg s-s spacing (m): `{avg_ss_spacing_m:.3f}`")
                 st.write(
                     f"Time-weighted average density: `{overall_avg_m2:.2f} plants/m²`"
                 )
