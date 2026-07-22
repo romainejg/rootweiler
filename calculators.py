@@ -1289,7 +1289,7 @@ class MGSLettuceCalculator:
     @staticmethod
     def _pair_overlap_pct(spacing_m: float, diameter_m: float) -> float:
         """Overlap area (% of a single circle area) for two equal circles."""
-        if diameter_m <= 0:
+        if diameter_m <= 1e-9:
             return 0.0
         if spacing_m <= 0:
             return 100.0
@@ -1529,7 +1529,7 @@ class MGSLettuceCalculator:
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             "Plant circles represent crop diameter using the weekly schedule (+1 inch per week). "
-            "Week 1 starts at day 1. Gutter rectangles reflect actual gutter width."
+            "Week count starts at day 1 (days 1-7 = week 1). Gutter rectangles reflect actual gutter width."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
@@ -1663,7 +1663,7 @@ class MGSLettuceCalculator:
                     min_value=0.0,
                     value=zc.get("spacing_val", 20.0),
                     step=1.0,
-                    help="center-to-center spacing between gutters.",
+                    help="Center-to-center spacing between gutters.",
                     key=f"mgs_zone_spacing_val_{i}",
                 )
                 zc["spacing_val"] = zone_spacing_val
@@ -1764,6 +1764,9 @@ class MGSLettuceCalculator:
             st.markdown("### System layout")
             if st.button("Generate system layout visual", key="mgs_generate_layout"):
                 st.session_state["mgs_show_layout"] = True
+            if st.session_state.get("mgs_show_layout", False):
+                if st.button("Hide system layout visual", key="mgs_hide_layout"):
+                    st.session_state["mgs_show_layout"] = False
             if st.session_state.get("mgs_show_layout", False):
                 cls._render_system_visual(
                     zone_inputs, gutter_length_m, gutter_width_m
