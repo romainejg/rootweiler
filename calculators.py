@@ -1291,9 +1291,9 @@ class MGSLettuceCalculator:
         """Overlap area (% of a single circle area) for two equal circles."""
         if spacing_m <= 0 or diameter_m <= 0:
             return 0.0
-        radius = diameter_m / 2.0
-        if spacing_m >= (2.0 * radius):
+        if spacing_m >= diameter_m:
             return 0.0
+        radius = diameter_m / 2.0
 
         d = spacing_m
         overlap_area = (
@@ -1526,7 +1526,8 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circles represent crop diameter using the weekly schedule (+1 inch per week); gutter rectangles reflect actual gutter width."
+            "Plant circles represent crop diameter using the weekly schedule (+1 inch per week). "
+            "Gutter rectangles reflect actual gutter width."
         )
         if plants_drawn >= cls._MAX_PLANT_CIRCLES:
             st.caption(
