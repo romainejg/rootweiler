@@ -1279,6 +1279,165 @@ class MGSLettuceCalculator:
         }
 
     @classmethod
+    def _render_system_visual(
+        cls,
+        zone_inputs: list,
+        gutter_length_m: float,
+        gutter_width_m: float,
+    ) -> None:
+        """
+        Render a top-down Plotly diagram of the MGS system.
+
+        Layout convention:
+        - X axis  → direction gutters travel through zones (each zone is a column)
+        - Y axis  → gutter length direction
+        - Zone width is proportional to days spent in that zone
+        - Horizontal lines inside each zone represent individual gutters
+          spaced at the zone's gutter pitch (gutter_width + zone_spacing)
+        """
+        total_days = sum(zi["days_in_zone"] for zi in zone_inputs)
+        if total_days <= 0 or gutter_length_m <= 0:
+            st.info("Enter valid zone days and gutter length to see the layout.")
+            return
+
+        # Colour palette (cycles if more zones than colours)
+        palette = [
+            "#4CAF50", "#2196F3", "#FF9800", "#9C27B0",
+            "#F44336", "#00BCD4", "#8BC34A", "#FF5722",
+            "#3F51B5", "#009688",
+        ]
+
+        fig = go.Figure()
+
+        x_cursor = 0.0  # running x position as zones are placed left-to-right
+
+        # Normalise: total x span = total_days (days are the width unit)
+        for idx, zi in enumerate(zone_inputs):
+            days = zi["days_in_zone"]
+            if days <= 0:
+                continue
+
+            zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
+            pitch_m = gutter_width_m + zone_spacing_m
+            seeds_per_m2 = cls.compute_seeds_per_m2(
+                gutter_length_m, gutter_width_m, zone_spacing_m, zi["seeds_per_gutter"]
+            )
+
+            zone_width = days  # proportional to days
+            color = palette[idx % len(palette)]
+            name = zi["name"]
+
+            # Zone rectangle (filled background)
+            fig.add_shape(
+                type="rect",
+                x0=x_cursor,
+                y0=0,
+                x1=x_cursor + zone_width,
+                y1=gutter_length_m,
+                fillcolor=color,
+                opacity=0.18,
+                line=dict(color=color, width=2),
+            )
+
+            # Gutter lines inside the zone
+            # Gutters run parallel to gutter length (vertical in diagram).
+            # They are spaced by pitch_m along the X axis.
+            # We draw up to a reasonable max to avoid over-crowding.
+            max_gutter_lines = 40
+            if pitch_m > 0:
+                num_gutters = zone_width / pitch_m
+                # Scale pitch to day-units for drawing
+                pitch_days = zone_width / num_gutters if num_gutters > 0 else zone_width
+                n_draw = min(int(num_gutters), max_gutter_lines)
+                for g in range(n_draw):
+                    gx = x_cursor + (g + 0.5) * pitch_days
+                    fig.add_shape(
+                        type="line",
+                        x0=gx,
+                        y0=0,
+                        x1=gx,
+                        y1=gutter_length_m,
+                        line=dict(color=color, width=1.2, dash="dot"),
+                    )
+
+            # Zone label annotation (centred in the zone rectangle)
+            mid_x = x_cursor + zone_width / 2
+            mid_y = gutter_length_m / 2
+
+            label = (
+                f"<b>{name}</b><br>"
+                f"{days:.0f} days<br>"
+                f"{seeds_per_m2:.1f} plants/m²<br>"
+                f"spacing: {zone_spacing_m * 100:.1f} cm"
+            )
+            fig.add_annotation(
+                x=mid_x,
+                y=mid_y,
+                text=label,
+                showarrow=False,
+                font=dict(size=12, color=color),
+                align="center",
+                bgcolor="rgba(255,255,255,0.75)",
+                bordercolor=color,
+                borderwidth=1,
+                borderpad=4,
+            )
+
+            # Arrow showing direction of gutter travel (at the top of each zone)
+            if idx < len(zone_inputs) - 1:
+                fig.add_annotation(
+                    x=x_cursor + zone_width,
+                    y=gutter_length_m * 1.05,
+                    ax=x_cursor + zone_width - zone_width * 0.25,
+                    ay=gutter_length_m * 1.05,
+                    xref="x", yref="y",
+                    axref="x", ayref="y",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1.2,
+                    arrowcolor="#555",
+                    text="",
+                )
+
+            x_cursor += zone_width
+
+        # Axis labels & styling
+        fig.update_layout(
+            xaxis=dict(
+                title="Zone width (proportional to days)",
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                range=[-total_days * 0.02, total_days * 1.05],
+            ),
+            yaxis=dict(
+                title=f"Gutter length ({gutter_length_m:.2f} m)",
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                range=[-gutter_length_m * 0.1, gutter_length_m * 1.2],
+                scaleanchor="x",
+                scaleratio=1 / (total_days / gutter_length_m),
+            ),
+            height=340,
+            margin=dict(l=10, r=10, t=30, b=10),
+            plot_bgcolor="rgba(245,247,250,1)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+        )
+
+        # "Gutter travel →" label along the top
+        fig.add_annotation(
+            x=total_days / 2,
+            y=gutter_length_m * 1.15,
+            text="← Gutter travel direction →",
+            showarrow=False,
+            font=dict(size=11, color="#555"),
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    @classmethod
     def render(cls):
         st.subheader("MGS Lettuce Density")
 
@@ -1472,6 +1631,13 @@ class MGSLettuceCalculator:
         if rows:
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # System visualization
+        if rows:
+            st.markdown("### System layout")
+            cls._render_system_visual(
+                zone_inputs, gutter_length_m, gutter_width_m
+            )
 
         # Overall time-weighted average density
         if total_days > 0:
