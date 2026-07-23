@@ -14,7 +14,7 @@ class DLICalculator:
     SOLAR_MODE = "Solar radiation (kWh·m⁻²·day⁻¹)"
     PAR_W_TO_PPFD = 4.57
     # Approximation for outdoor global radiation under typical greenhouse assumptions:
-    # PAR fraction ≈ 45% of total solar energy and PAR efficacy ≈ 2.04 mol·MJ⁻¹.
+    # PAR fraction ≈ 45% of total solar energy and PAR efficacy ≈ 2.04 µmol·J⁻¹.
     SOLAR_KWH_TO_DLI = 7.344  # DLI ≈ Solar radiation (kWh·m⁻²·day⁻¹) × 7.344
 
     @staticmethod
@@ -98,7 +98,8 @@ class DLICalculator:
                     key="dli_transmissivity",
                 )
             else:
-                transmissivity_pct = 100.0  # Indoor canopy measurements are already transmitted values.
+                # Indoor input is measured at canopy level, so no extra transmissivity adjustment is needed.
+                transmissivity_pct = 100.0
 
             if light_input_mode in {cls.PPFD_MODE, cls.PAR_MODE}:
                 hours = st.number_input(
@@ -1182,7 +1183,9 @@ class UnitConverterCalculator:
             or to_unit in cls.PHOTOPERIOD_REQUIRED_UNITS
         )
         if needs_photoperiod and photoperiod_hours <= 0:
-            raise ValueError("Photoperiod must be greater than zero for light-energy conversions.")
+            raise ValueError(
+                "Photoperiod must be greater than zero when converting to/from PPFD or PAR."
+            )
 
         if from_unit == "DLI (mol·m⁻²·day⁻¹)":
             dli = value
@@ -1257,7 +1260,7 @@ class UnitConverterCalculator:
             st.caption(
                 "DLI/PPFD/PAR conversions use the selected photoperiod. "
                 "Solar radiation conversion uses DLI ≈ kWh·m⁻²·day⁻¹ × 7.344 "
-                "(assuming ~45% PAR fraction and ~2.04 mol·MJ⁻¹ PAR efficacy)."
+                "(assuming ~45% PAR fraction and ~2.04 µmol·J⁻¹ PAR efficacy)."
             )
             photoperiod_hours = st.number_input(
                 "Photoperiod (hours per day)",
@@ -1523,7 +1526,7 @@ class MGSLettuceCalculator:
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
             max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
-            plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
+            plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
 
             # Zone rectangle (filled background)
             fig.add_shape(
@@ -1561,7 +1564,7 @@ class MGSLettuceCalculator:
             # Plant positions as data-coordinate circle shapes so diameter/spacing
             # remain geometrically accurate on true full plant counts per gutter.
             # Table overlap metrics remain analytic and are the source of truth.
-            if gutter_centers:
+            if gutter_centers and plants_per_gutter > 0:
                 y_positions = cls._all_y_positions(gutter_length_m, plants_per_gutter)
                 for gx, gutter_diameter_m in gutter_centers:
                     r = gutter_diameter_m / 2.0
