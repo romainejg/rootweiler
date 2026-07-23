@@ -1331,7 +1331,16 @@ class MGSLettuceCalculator:
 
     @classmethod
     def _plants_to_draw_for_overlap(cls, overlap_pct: float, plants_per_gutter: int) -> int:
-        """Adaptive plant sampling count for overlap visualization."""
+        """
+        Adaptive plant sampling count for overlap visualization.
+
+        Thresholds:
+        - overlap >= 40% -> high detail (`_MAX_VISUAL_PLANTS`)
+        - overlap >= 15% -> medium detail (`_MID_VISUAL_PLANTS`)
+        - otherwise -> low detail (`_MIN_VISUAL_PLANTS`)
+        """
+        # Tier thresholds prioritize detail when overlap is likely to affect spacing
+        # interpretation most: >=40% (high), >=15% (moderate), else low.
         if overlap_pct >= 40.0:
             target = cls._MAX_VISUAL_PLANTS
         elif overlap_pct >= 15.0:
@@ -1447,7 +1456,9 @@ class MGSLettuceCalculator:
                     gutter_length_m * (p + 0.5) / plants_to_draw
                     for p in range(plants_to_draw)
                 ]
-                center_idx = min(cls._CIRCLE_GUTTER_INDEX, len(gutter_centers) - 1)
+                center_idx = max(
+                    0, min(cls._CIRCLE_GUTTER_INDEX, len(gutter_centers) - 1)
+                )
                 gx, gutter_diameter_m = gutter_centers[center_idx]
                 r = gutter_diameter_m / 2.0
                 if r > 0:
