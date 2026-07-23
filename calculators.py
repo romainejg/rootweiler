@@ -1346,8 +1346,8 @@ class MGSLettuceCalculator:
           drawn circles reflect the true seed spacing (and therefore true overlap
           cues) rather than artificially re-packed positions.
         """
-        n = max(1, plants_per_gutter)
-        cap = max(1, max_visual_plants)
+        n = plants_per_gutter if plants_per_gutter >= 1 else 1
+        cap = max_visual_plants if max_visual_plants >= 1 else 1
         if n <= cap:
             return [gutter_length_m * (i + 0.5) / n for i in range(n)]
         # Uniform stride: linspace over index space, rounded to integer indices.
@@ -1355,8 +1355,8 @@ class MGSLettuceCalculator:
         if cap == 1:
             return [gutter_length_m * 0.5 / n]
         indices = [round(i * (n - 1) / (cap - 1)) for i in range(cap)]
-        # Deduplicate while preserving monotonic order (can occur when cap is large
-        # relative to n, though the n > cap guard above makes this very rare).
+        # Deduplicate while preserving monotonic order. Rounding can produce
+        # repeated indices when n is only slightly greater than cap (e.g. n=37, cap=36).
         seen: set[int] = set()
         unique: list[int] = []
         for idx in indices:
