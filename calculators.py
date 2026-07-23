@@ -1336,6 +1336,20 @@ class MGSLettuceCalculator:
         return [gutter_length_m * (i + 0.5) / n for i in range(n)]
 
     @classmethod
+    def _visualized_gutter_segment(
+        cls,
+        gutter_length_m: float,
+        plants_per_gutter: int,
+        max_visualized_plants: int = 10,
+    ) -> tuple[float, int]:
+        """Return the gutter segment length needed to visualize up to N plants."""
+        if gutter_length_m <= 0 or plants_per_gutter <= 0:
+            return gutter_length_m, 0
+        visualized_plants = min(plants_per_gutter, max_visualized_plants)
+        visualized_length_m = gutter_length_m * (visualized_plants / plants_per_gutter)
+        return visualized_length_m, visualized_plants
+
+    @classmethod
     def _render_system_visual(
         cls,
         zone_inputs: list,
@@ -1347,13 +1361,14 @@ class MGSLettuceCalculator:
 
         Layout convention:
         - X axis  → physical zone width (metres)
-        - Y axis  → gutter length direction
+        - Y axis  → visualized gutter segment length direction
         - Vertical gutter rectangles reflect gutter width and c-c spacing
         - Circles on gutters represent plant position and diameter by day
 
         One gutter is rendered for each day in a zone (minimum 1 gutter).
-        Plant circles are rendered for all plants in each rendered gutter so
-        spacing reflects true plants-per-gutter values.
+        Each gutter only shows the segment needed to display up to 10 plants,
+        scaled proportionally from the true gutter length so spacing reflects
+        the true plants-per-gutter density.
         """
         if gutter_length_m <= 0 or gutter_width_m <= 0:
             st.info("Enter valid gutter dimensions to see the layout.")
@@ -1367,6 +1382,21 @@ class MGSLettuceCalculator:
         ]
 
         fig = go.Figure()
+
+        rendered_lengths = []
+        for zi in zone_inputs:
+            if zi["days_in_zone"] <= 0:
+                continue
+            plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
+            rendered_length_m, _ = cls._visualized_gutter_segment(
+                gutter_length_m, plants_per_gutter
+            )
+            rendered_lengths.append(rendered_length_m)
+
+        max_rendered_gutter_length_m = (
+            max(rendered_lengths) if rendered_lengths else gutter_length_m
+        )
+        label_y = -max_rendered_gutter_length_m * 0.28
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
@@ -1394,7 +1424,10 @@ class MGSLettuceCalculator:
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
             max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
-            plants_per_gutter = max(1, int(round(zi["seeds_per_gutter"])))
+            plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
+            rendered_gutter_length_m, visualized_plants = (
+                cls._visualized_gutter_segment(gutter_length_m, plants_per_gutter)
+            )
 
             # Zone rectangle (filled background)
             fig.add_shape(
@@ -1402,7 +1435,7 @@ class MGSLettuceCalculator:
                 x0=x_cursor,
                 y0=0,
                 x1=x_cursor + zone_width,
-                y1=gutter_length_m,
+                y1=rendered_gutter_length_m,
                 fillcolor=color,
                 opacity=0.18,
                 line=dict(color=color, width=2),
@@ -1424,7 +1457,7 @@ class MGSLettuceCalculator:
                     x0=gx - gutter_width_m / 2.0,
                     y0=0,
                     x1=gx + gutter_width_m / 2.0,
-                    y1=gutter_length_m,
+                    y1=rendered_gutter_length_m,
                     line=dict(color=color, width=1.0),
                     fillcolor="rgba(255,255,255,0.25)",
                 )
@@ -1432,8 +1465,10 @@ class MGSLettuceCalculator:
             # Plant positions as data-coordinate circle shapes so diameter/spacing
             # remain geometrically accurate on true full plant counts per gutter.
             # Table overlap metrics remain analytic and are the source of truth.
-            if gutter_centers:
-                y_positions = cls._all_y_positions(gutter_length_m, plants_per_gutter)
+            if gutter_centers and visualized_plants > 0:
+                y_positions = cls._all_y_positions(
+                    rendered_gutter_length_m, visualized_plants
+                )
                 for gx, gutter_diameter_m in gutter_centers:
                     r = gutter_diameter_m / 2.0
                     if r > 0:
@@ -1448,10 +1483,8 @@ class MGSLettuceCalculator:
                                 opacity=0.65,
                             )
 
-            # Zone label annotation (centred in the zone rectangle)
+            # Zone label annotation (placed below the gutters)
             mid_x = x_cursor + zone_width / 2
-            mid_y = gutter_length_m / 2
-
             label = (
                 f"<b>{name}</b><br>"
                 f"{days:.0f} days<br>"
@@ -1462,7 +1495,7 @@ class MGSLettuceCalculator:
             )
             fig.add_annotation(
                 x=mid_x,
-                y=mid_y,
+                y=label_y,
                 text=label,
                 showarrow=False,
                 font=dict(size=12, color=color),
@@ -1477,9 +1510,9 @@ class MGSLettuceCalculator:
             if idx < len(zone_inputs) - 1:
                 fig.add_annotation(
                     x=x_cursor + zone_width,
-                    y=gutter_length_m * 1.05,
+                    y=max_rendered_gutter_length_m * 1.05,
                     ax=x_cursor + zone_width - zone_width * 0.25,
-                    ay=gutter_length_m * 1.05,
+                    ay=max_rendered_gutter_length_m * 1.05,
                     xref="x", yref="y",
                     axref="x", ayref="y",
                     showarrow=True,
@@ -1491,13 +1524,15 @@ class MGSLettuceCalculator:
 
             x_cursor += zone_width
 
-            # Add a gap between zones equal to the next zone's c-c spacing so that
-            # the visual distance from the last gutter of this zone to the first
-            # gutter of the next zone reflects the new zone's spacing.
+            # Start the next zone so the distance from the previous zone's last
+            # gutter center to the next zone's first gutter center matches the
+            # next zone's c-c spacing exactly.
             if idx < len(zone_inputs) - 1:
                 next_zi = zone_inputs[idx + 1]
-                next_spacing_m = cls.to_meters(next_zi["spacing_val"], next_zi["spacing_unit"])
-                x_cursor += next_spacing_m
+                next_spacing_m = cls.to_meters(
+                    next_zi["spacing_val"], next_zi["spacing_unit"]
+                )
+                x_cursor += next_spacing_m - gutter_width_m
 
             cumulative_day += days
 
@@ -1513,11 +1548,14 @@ class MGSLettuceCalculator:
                 range=[-total_width * 0.02, total_width * 1.05],
             ),
             yaxis=dict(
-                title=f"Gutter length ({gutter_length_m:.2f} m)",
+                title="Visualized gutter segment (m)",
                 showticklabels=False,
                 showgrid=False,
                 zeroline=False,
-                range=[-gutter_length_m * 0.1, gutter_length_m * 1.2],
+                range=[
+                    -max_rendered_gutter_length_m * 0.55,
+                    max_rendered_gutter_length_m * 1.25,
+                ],
                 # Keep x and y in a 1:1 data-unit scale so plant diameters and
                 # gutter spacing are visually comparable in metre units.
                 scaleanchor="x",
@@ -1533,7 +1571,7 @@ class MGSLettuceCalculator:
         # "Gutter travel →" label along the top
         fig.add_annotation(
             x=total_width / 2,
-            y=gutter_length_m * 1.15,
+            y=max_rendered_gutter_length_m * 1.15,
             text="Gutter travel direction →",
             showarrow=False,
             font=dict(size=11, color="#555"),
@@ -1541,10 +1579,11 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Each zone shows one rendered gutter per day in the zone. Plant circles "
-            "are rendered for all plants per gutter at full count, and plant diameter "
-            "uses D(t) = 5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. "
-            "Table overlap metrics remain analytic and are the source of truth."
+            "Each zone shows one rendered gutter per day in the zone. Each gutter is "
+            "truncated to the segment needed to display up to 10 plants while preserving "
+            "the true seed spacing for that zone. Plant diameter uses D(t) = "
+            "5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. Table overlap "
+            "metrics remain analytic and are the source of truth."
         )
 
     @classmethod
