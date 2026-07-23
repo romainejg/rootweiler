@@ -1192,7 +1192,9 @@ class MGSLettuceCalculator:
     _DAYS_PER_INCH_GROWTH = 7.0  # crop diameter grows 1 inch per 7 days (linear)
     _VIS_Y_RANGE_FACTOR = 1.3  # y data range factor: range spans gutter_length_m * 1.3
     _N_GUTTERS_VISUAL = 3      # representative gutters drawn per zone in the layout visual
-    _MAX_VISUAL_PLANTS = 60    # max plant circles drawn per gutter in the layout visual
+    # Cap plant circles per gutter at 60: keeps shape count ≤ ~1 080 for a 6-zone system
+    # (3 gutters × 60 plants × 6 zones) while still giving a clear density impression.
+    _MAX_VISUAL_PLANTS = 60
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1537,11 +1539,12 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            f"Each zone shows {cls._N_GUTTERS_VISUAL} representative gutters at early, mid, and late "
-            "positions within the zone. Plant circles are drawn at true data-unit diameter "
+            f"Each zone shows {cls._N_GUTTERS_VISUAL} representative gutters spread evenly across "
+            "the zone's day range. Plant circles are drawn at true data-unit diameter "
             "(day 0 = 0 in, day 7 = 1 in, day 14 = 2 in, etc.) so they are always "
             f"accurate relative to gutter width and c-c spacing. "
-            f"Up to {cls._MAX_VISUAL_PLANTS} plants shown per gutter."
+            f"Up to {cls._MAX_VISUAL_PLANTS} plants shown per gutter "
+            "(actual gutter count and plant totals are shown in the table above)."
         )
 
     @classmethod
