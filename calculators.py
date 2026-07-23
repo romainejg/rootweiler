@@ -1344,11 +1344,13 @@ class MGSLettuceCalculator:
         cls,
         gutter_length_m: float,
         plants_per_gutter: int,
-        max_visualized_plants: int = 10,
+        max_visualized_plants: int | None = None,
     ) -> tuple[float, int]:
         """Return the gutter segment length needed to visualize up to N plants."""
         if gutter_length_m <= 0 or plants_per_gutter <= 0:
             return 0.0, 0
+        if max_visualized_plants is None:
+            max_visualized_plants = cls._MAX_VISUALIZED_PLANTS
         visualized_plants = min(plants_per_gutter, max_visualized_plants)
         visualized_length_m = gutter_length_m * (visualized_plants / plants_per_gutter)
         return visualized_length_m, visualized_plants
@@ -1394,7 +1396,7 @@ class MGSLettuceCalculator:
             plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
             if plants_per_gutter <= 0:
                 continue
-            rendered_length_m, _ = cls._visualized_gutter_segment(
+            rendered_length_m, _visualized_plants = cls._visualized_gutter_segment(
                 gutter_length_m, plants_per_gutter
             )
             if rendered_length_m > 0:
@@ -1545,6 +1547,9 @@ class MGSLettuceCalculator:
                 next_spacing_m = cls.to_meters(
                     next_zi["spacing_val"], next_zi["spacing_unit"]
                 )
+                # When c-c spacing is tighter than gutter width, overlapping the
+                # rendered gutters is intentional so the center-to-center spacing
+                # still matches the configured next-zone value.
                 if next_spacing_m < gutter_width_m:
                     overlapping_spacing_detected = True
                 x_cursor = (
