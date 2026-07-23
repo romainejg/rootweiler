@@ -1195,6 +1195,7 @@ class MGSLettuceCalculator:
     _LABEL_Y_OFFSET_FACTOR = 0.28
     _VIS_Y_BOTTOM_PADDING_FACTOR = 0.55
     _VIS_Y_TOP_PADDING_FACTOR = 1.25
+    _MIN_LAYOUT_SEGMENT_M = 0.1
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1340,6 +1341,11 @@ class MGSLettuceCalculator:
         return [gutter_length_m * (i + 0.5) / n for i in range(n)]
 
     @classmethod
+    def _plants_per_gutter_count(cls, seeds_per_gutter: float) -> int:
+        """Return the rounded visible plant count for layout rendering."""
+        return max(0, int(round(seeds_per_gutter)))
+
+    @classmethod
     def _visualized_gutter_segment(
         cls,
         gutter_length_m: float,
@@ -1393,17 +1399,21 @@ class MGSLettuceCalculator:
         for zi in zone_inputs:
             if zi["days_in_zone"] <= 0:
                 continue
-            plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
+            plants_per_gutter = cls._plants_per_gutter_count(zi["seeds_per_gutter"])
             if plants_per_gutter <= 0:
                 continue
             rendered_length_m, _visualized_plants = cls._visualized_gutter_segment(
                 gutter_length_m, plants_per_gutter
             )
             if rendered_length_m > 0:
+                # Only visible gutter segments affect the y-axis scale; zero-plant
+                # zones still participate in spacing and labeling below.
                 rendered_lengths.append(rendered_length_m)
 
         max_rendered_gutter_length_m = (
-            max(rendered_lengths) if rendered_lengths else gutter_length_m
+            max(rendered_lengths)
+            if rendered_lengths
+            else max(gutter_length_m * 0.05, cls._MIN_LAYOUT_SEGMENT_M)
         )
         label_y = -max_rendered_gutter_length_m * cls._LABEL_Y_OFFSET_FACTOR
 
@@ -1435,7 +1445,7 @@ class MGSLettuceCalculator:
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
             max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
             # A zone can intentionally have zero plants after losses/transplants.
-            plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
+            plants_per_gutter = cls._plants_per_gutter_count(zi["seeds_per_gutter"])
             if plants_per_gutter > 0:
                 rendered_gutter_length_m, visualized_plants = (
                     cls._visualized_gutter_segment(gutter_length_m, plants_per_gutter)
@@ -1554,8 +1564,9 @@ class MGSLettuceCalculator:
                 if next_spacing_m < gutter_width_m:
                     overlapping_spacing_detected = True
                 x_cursor = (
-                    # Convert the next zone's first gutter center position into
-                    # the left-edge x origin used to place the zone rectangle.
+                    # Set the next iteration's x origin by converting the desired
+                    # first-gutter center position into the next zone rectangle's
+                    # left edge.
                     last_gutter_center_x
                     + next_spacing_m
                     - gutter_width_m / 2.0
