@@ -1698,6 +1698,10 @@ class MGSLettuceCalculator:
                             else "rgba(255,255,255,0)"
                         )
                         for cy in y_positions:
+                            # Plotly's "circle" type inscribes the shape in
+                            # its bounding box, so different ax / ay values
+                            # produce a true ellipse (there is no "ellipse"
+                            # type in Plotly shapes).
                             fig.add_shape(
                                 type="circle",
                                 x0=gx - ax,
