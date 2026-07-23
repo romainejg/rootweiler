@@ -1191,6 +1191,10 @@ class MGSLettuceCalculator:
     _INCH_TO_M = 0.0254
     _MM_TO_M = 0.001
     _VIS_Y_RANGE_FACTOR = 1.3  # y data range factor: range spans gutter_length_m * 1.3
+    _MAX_VISUALIZED_PLANTS = 10
+    _LABEL_Y_OFFSET_FACTOR = 0.28
+    _VIS_Y_BOTTOM_PADDING_FACTOR = 0.55
+    _VIS_Y_TOP_PADDING_FACTOR = 1.25
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1340,11 +1344,11 @@ class MGSLettuceCalculator:
         cls,
         gutter_length_m: float,
         plants_per_gutter: int,
-        max_visualized_plants: int = 10,
+        max_visualized_plants: int = _MAX_VISUALIZED_PLANTS,
     ) -> tuple[float, int]:
         """Return the gutter segment length needed to visualize up to N plants."""
         if gutter_length_m <= 0 or plants_per_gutter <= 0:
-            return gutter_length_m, 0
+            return 0.0, 0
         visualized_plants = min(plants_per_gutter, max_visualized_plants)
         visualized_length_m = gutter_length_m * (visualized_plants / plants_per_gutter)
         return visualized_length_m, visualized_plants
@@ -1391,12 +1395,13 @@ class MGSLettuceCalculator:
             rendered_length_m, _ = cls._visualized_gutter_segment(
                 gutter_length_m, plants_per_gutter
             )
-            rendered_lengths.append(rendered_length_m)
+            if rendered_length_m > 0:
+                rendered_lengths.append(rendered_length_m)
 
         max_rendered_gutter_length_m = (
             max(rendered_lengths) if rendered_lengths else gutter_length_m
         )
-        label_y = -max_rendered_gutter_length_m * 0.28
+        label_y = -max_rendered_gutter_length_m * cls._LABEL_Y_OFFSET_FACTOR
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
@@ -1553,8 +1558,8 @@ class MGSLettuceCalculator:
                 showgrid=False,
                 zeroline=False,
                 range=[
-                    -max_rendered_gutter_length_m * 0.55,
-                    max_rendered_gutter_length_m * 1.25,
+                    -max_rendered_gutter_length_m * cls._VIS_Y_BOTTOM_PADDING_FACTOR,
+                    max_rendered_gutter_length_m * cls._VIS_Y_TOP_PADDING_FACTOR,
                 ],
                 # Keep x and y in a 1:1 data-unit scale so plant diameters and
                 # gutter spacing are visually comparable in metre units.
