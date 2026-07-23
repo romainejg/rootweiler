@@ -1320,7 +1320,7 @@ class MGSLettuceCalculator:
 
     @classmethod
     def _plant_diameter_m_from_day(cls, day_number: float) -> float:
-        """Plant diameter in metres using D(t) = 5 + 295 / (1 + exp(-0.148 * (t - 29.5)))."""
+        """Plant diameter in metres using D(t) in mm = 5 + 295 / (1 + exp(-0.148 * (t - 29.5)))."""
         t = max(0.0, float(day_number))
         diameter_mm = 5.0 + (295.0 / (1.0 + math.exp(-0.148 * (t - 29.5))))
         return diameter_mm * cls._MM_TO_M
@@ -1416,7 +1416,7 @@ class MGSLettuceCalculator:
 
             for g in range(n_day_gutters):
                 gx = first_center_x + g * gutter_step
-                day_at_gutter = cumulative_day + min(days, float(g + 1))
+                day_at_gutter = cumulative_day + min(days, float(g))
                 gutter_diameter_m = cls._plant_diameter_m_from_day(day_at_gutter)
                 gutter_centers.append((gx, gutter_diameter_m))
                 fig.add_shape(
