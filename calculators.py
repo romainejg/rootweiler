@@ -1434,6 +1434,7 @@ class MGSLettuceCalculator:
             overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
             max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
+            # A zone can intentionally have zero plants after losses/transplants.
             plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
             if plants_per_gutter > 0:
                 rendered_gutter_length_m, visualized_plants = (
@@ -1553,6 +1554,8 @@ class MGSLettuceCalculator:
                 if next_spacing_m < gutter_width_m:
                     overlapping_spacing_detected = True
                 x_cursor = (
+                    # Convert the next zone's first gutter center position into
+                    # the left-edge x origin used to place the zone rectangle.
                     last_gutter_center_x
                     + next_spacing_m
                     - gutter_width_m / 2.0
