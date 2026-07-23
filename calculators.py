@@ -1562,14 +1562,14 @@ class MGSLettuceCalculator:
         plants_per_gutter: int,
         max_visualized_plants: int | None = None,
     ) -> tuple[float, int]:
-        """Return the fixed rendered gutter length and visualized plant count."""
+        """Return full gutter length plus displayed-plant count capped at max."""
         if gutter_length_m <= 0 or plants_per_gutter <= 0:
             return 0.0, 0
         if max_visualized_plants is None:
             max_visualized_plants = cls._MAX_VISUALIZED_PLANTS
-        visualized_plants = min(plants_per_gutter, max_visualized_plants)
+        displayed_plant_count = min(plants_per_gutter, max_visualized_plants)
         visualized_length_m = gutter_length_m
-        return visualized_length_m, visualized_plants
+        return visualized_length_m, displayed_plant_count
 
     @classmethod
     def _render_system_visual(
@@ -1638,12 +1638,12 @@ class MGSLettuceCalculator:
             # A zone can intentionally have zero plants after losses/transplants.
             plants_per_gutter = cls._plants_per_gutter_count(zi["seeds_per_gutter"])
             if plants_per_gutter > 0:
-                rendered_gutter_length_m, visualized_plants = (
+                rendered_gutter_length_m, displayed_plant_count = (
                     cls._visualized_gutter_segment(gutter_length_m, plants_per_gutter)
                 )
             else:
                 rendered_gutter_length_m = 0.0
-                visualized_plants = 0
+                displayed_plant_count = 0
 
             # Zone rectangle (filled background)
             fig.add_shape(
@@ -1684,10 +1684,10 @@ class MGSLettuceCalculator:
             # longitudinally (y) and expands laterally (x) to preserve the
             # natural canopy area.  A reddish fill appears once biology limits
             # prevent full area recovery (crowding_score > 0).
-            if gutter_centers and visualized_plants > 0:
+            if gutter_centers and displayed_plant_count > 0:
                 y_positions = cls._all_y_positions(
                     rendered_gutter_length_m, plants_per_gutter
-                )[:visualized_plants]
+                )[:displayed_plant_count]
                 for gx, gutter_diameter_m in gutter_centers:
                     ax, ay, crowding_score = cls._plant_ellipse_axes(
                         gutter_diameter_m, seed_spacing_m, zone_spacing_m
