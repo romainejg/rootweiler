@@ -9,6 +9,14 @@ import canopy_closure as cc
 class DLICalculator:
     """Daily Light Integral calculator."""
 
+    PPFD_MODE = "PPFD (µmol·m⁻²·s⁻¹)"
+    PAR_MODE = "PAR (W·m⁻²)"
+    SOLAR_MODE = "Solar radiation (kWh·m⁻²·day⁻¹)"
+    PAR_W_TO_PPFD = 4.57
+    # Approximation for outdoor global radiation under typical greenhouse assumptions:
+    # PAR fraction ≈ 45% of total solar energy and PAR efficacy ≈ 2.04 µmol·J⁻¹.
+    SOLAR_KWH_TO_DLI = 7.344  # DLI ≈ Solar radiation (kWh·m⁻²·day⁻¹) × 7.344
+
     @staticmethod
     def compute_dli(ppfd: float, hours: float) -> float:
         """
@@ -28,26 +36,30 @@ class DLICalculator:
             DLI describes the total amount of photosynthetically active light a crop
             receives over a day, in **mol·m⁻²·day⁻¹**.
 
-            This calculator accepts light input as either **PPFD** (µmol·m⁻²·s⁻¹) or
-            **PAR** (W·m⁻²). PAR in W·m⁻² is converted to PPFD using the standard
-            approximation: *PPFD ≈ PAR × 4.57*.
+            This calculator accepts light input as **PPFD** (µmol·m⁻²·s⁻¹),
+            **PAR** (W·m⁻²), or **Solar radiation** (kWh·m⁻²·day⁻¹).
             """
         )
 
-        col_mode, _ = st.columns([1, 2])
+        col_mode, col_location = st.columns([2, 2])
         with col_mode:
             light_input_mode = st.radio(
                 "Light input type",
-                ["PPFD (µmol·m⁻²·s⁻¹)", "PAR (W·m⁻²)"],
+                [cls.PPFD_MODE, cls.PAR_MODE, cls.SOLAR_MODE],
                 index=0,
-                horizontal=True,
                 key="dli_light_mode",
             )
-
+        with col_location:
+            measured_location = st.radio(
+                "Where is the light measured?",
+                ["Indoor at canopy level", "Outdoor"],
+                index=0,
+                key="dli_measured_location",
+            )
         col1, col2 = st.columns(2)
 
         with col1:
-            if light_input_mode == "PPFD (µmol·m⁻²·s⁻¹)":
+            if light_input_mode == cls.PPFD_MODE:
                 light_value = st.number_input(
                     "Average PPFD (µmol·m⁻²·s⁻¹)",
                     min_value=0.0,
@@ -56,8 +68,7 @@ class DLICalculator:
                     step=10.0,
                     key="dli_ppfd",
                 )
-                ppfd = light_value
-            else:
+            elif light_input_mode == cls.PAR_MODE:
                 light_value = st.number_input(
                     "Average PAR (W·m⁻²)",
                     min_value=0.0,
@@ -66,26 +77,73 @@ class DLICalculator:
                     step=1.0,
                     key="dli_par",
                 )
-                ppfd = light_value * 4.57  # PAR (W/m²) → PPFD (µmol/m²/s)
+            else:
+                light_value = st.number_input(
+                    "Daily solar radiation (kWh·m⁻²·day⁻¹)",
+                    min_value=0.0,
+                    max_value=20.0,
+                    value=4.0,
+                    step=0.1,
+                    key="dli_solar",
+                )
 
         with col2:
-            hours = st.number_input(
-                "Photoperiod (hours per day)",
-                min_value=0.0,
-                max_value=24.0,
-                value=16.0,
-                step=0.5,
-                key="dli_hours",
-            )
+            if measured_location == "Outdoor":
+                transmissivity_pct = st.number_input(
+                    "Greenhouse transmissivity (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=70.0,
+                    step=1.0,
+                    key="dli_transmissivity",
+                )
+            else:
+                # Indoor input is measured at canopy level, so no extra transmissivity adjustment is needed.
+                transmissivity_pct = 100.0
 
-        if ppfd > 0 and hours > 0:
+            if light_input_mode in {cls.PPFD_MODE, cls.PAR_MODE}:
+                hours = st.number_input(
+                    "Photoperiod (hours per day)",
+                    min_value=0.0,
+                    max_value=24.0,
+                    value=16.0,
+                    step=0.5,
+                    key="dli_hours",
+                )
+            else:
+                hours = None
+
+        transmissivity_factor = transmissivity_pct / 100.0
+
+        if light_input_mode == cls.PPFD_MODE:
+            ppfd = light_value * transmissivity_factor
             dli = cls.compute_dli(ppfd, hours)
+        elif light_input_mode == cls.PAR_MODE:
+            par_canopy = light_value * transmissivity_factor
+            ppfd = par_canopy * cls.PAR_W_TO_PPFD
+            dli = cls.compute_dli(ppfd, hours)
+        else:
+            solar_canopy = light_value * transmissivity_factor
+            dli = solar_canopy * cls.SOLAR_KWH_TO_DLI
+            ppfd = None
+
+        if dli > 0:
             st.markdown("### Result")
-            if light_input_mode == "PAR (W·m⁻²)":
+            if measured_location == "Outdoor" and transmissivity_pct < 100.0:
+                st.write(f"Applied transmissivity: **{transmissivity_pct:.0f}%**")
+            if light_input_mode == cls.PAR_MODE:
+                st.write(f"Canopy PAR: **{par_canopy:.1f} W·m⁻²**")
                 st.write(f"Converted PPFD: **{ppfd:.1f} µmol·m⁻²·s⁻¹**")
+            elif light_input_mode == cls.PPFD_MODE:
+                st.write(f"Canopy PPFD: **{ppfd:.1f} µmol·m⁻²·s⁻¹**")
+            else:
+                st.write(f"Canopy solar radiation: **{solar_canopy:.2f} kWh·m⁻²·day⁻¹**")
             st.write(f"**DLI: {dli:.2f} mol·m⁻²·day⁻¹**")
         else:
-            st.info("Enter a light value and photoperiod above zero to see the DLI.")
+            if light_input_mode == cls.SOLAR_MODE:
+                st.info("Enter a light value above zero to see the DLI.")
+            else:
+                st.info("Enter a light value and photoperiod above zero to see the DLI.")
 
 
 class VPDCalculator:
@@ -1062,6 +1120,14 @@ class UnitConverterCalculator:
         "oz": 0.0283495231,
     }
 
+    LIGHT_ENERGY_UNITS = [
+        "DLI (mol·m⁻²·day⁻¹)",
+        DLICalculator.PPFD_MODE,
+        DLICalculator.PAR_MODE,
+        DLICalculator.SOLAR_MODE,
+    ]
+    PHOTOPERIOD_REQUIRED_UNITS = {DLICalculator.PPFD_MODE, DLICalculator.PAR_MODE}
+
     @staticmethod
     def convert_length(value: float, from_unit: str, to_unit: str) -> float:
         base = value * UnitConverterCalculator.LENGTH_FACTORS[from_unit]
@@ -1105,6 +1171,46 @@ class UnitConverterCalculator:
             return c
 
     @classmethod
+    def convert_light_energy(
+        cls,
+        value: float,
+        from_unit: str,
+        to_unit: str,
+        photoperiod_hours: float,
+    ) -> float:
+        needs_photoperiod = (
+            from_unit in cls.PHOTOPERIOD_REQUIRED_UNITS
+            or to_unit in cls.PHOTOPERIOD_REQUIRED_UNITS
+        )
+        if needs_photoperiod and photoperiod_hours <= 0:
+            raise ValueError(
+                "Photoperiod must be greater than zero when converting to/from PPFD or PAR."
+            )
+
+        if from_unit == "DLI (mol·m⁻²·day⁻¹)":
+            dli = value
+        elif from_unit == DLICalculator.PPFD_MODE:
+            dli = DLICalculator.compute_dli(value, photoperiod_hours)
+        elif from_unit == DLICalculator.PAR_MODE:
+            ppfd = value * DLICalculator.PAR_W_TO_PPFD
+            dli = DLICalculator.compute_dli(ppfd, photoperiod_hours)
+        elif from_unit == DLICalculator.SOLAR_MODE:
+            dli = value * DLICalculator.SOLAR_KWH_TO_DLI
+        else:
+            raise ValueError(f"Unsupported light-energy source unit: {from_unit}")
+
+        if to_unit == "DLI (mol·m⁻²·day⁻¹)":
+            return dli
+        elif to_unit == DLICalculator.PPFD_MODE:
+            return dli * 1_000_000.0 / (photoperiod_hours * 3600.0)
+        elif to_unit == DLICalculator.PAR_MODE:
+            ppfd = dli * 1_000_000.0 / (photoperiod_hours * 3600.0)
+            return ppfd / DLICalculator.PAR_W_TO_PPFD
+        elif to_unit == DLICalculator.SOLAR_MODE:
+            return dli / DLICalculator.SOLAR_KWH_TO_DLI
+        raise ValueError(f"Unsupported light-energy target unit: {to_unit}")
+
+    @classmethod
     def render(cls):
         st.subheader("Unit Converter")
 
@@ -1118,7 +1224,7 @@ class UnitConverterCalculator:
 
         quantity_type = st.selectbox(
             "Quantity type",
-            ["Length", "Area", "Volume", "Mass", "Temperature"],
+            ["Length", "Area", "Volume", "Mass", "Temperature", "Energy"],
             index=0,
         )
 
@@ -1130,6 +1236,8 @@ class UnitConverterCalculator:
             units = list(cls.VOLUME_FACTORS.keys())
         elif quantity_type == "Mass":
             units = list(cls.MASS_FACTORS.keys())
+        elif quantity_type == "Energy":
+            units = cls.LIGHT_ENERGY_UNITS
         else:
             units = ["°C", "°F", "K"]
 
@@ -1144,6 +1252,25 @@ class UnitConverterCalculator:
         with col3:
             to_unit = st.selectbox("To", units, index=min(1, len(units) - 1))
 
+        if quantity_type == "Energy":
+            needs_photoperiod = (
+                from_unit in cls.PHOTOPERIOD_REQUIRED_UNITS
+                or to_unit in cls.PHOTOPERIOD_REQUIRED_UNITS
+            )
+            st.caption(
+                "DLI/PPFD/PAR conversions use the selected photoperiod. "
+                "Solar radiation conversion uses DLI ≈ kWh·m⁻²·day⁻¹ × 7.344 "
+                "(assuming ~45% PAR fraction and ~2.04 µmol·J⁻¹ PAR efficacy)."
+            )
+            photoperiod_hours = st.number_input(
+                "Photoperiod (hours per day)",
+                min_value=0.0,
+                max_value=24.0,
+                value=16.0,
+                step=0.5,
+                key="unit_energy_photoperiod",
+            )
+
         result = None
         if quantity_type == "Length":
             result = cls.convert_length(value, from_unit, to_unit)
@@ -1155,6 +1282,11 @@ class UnitConverterCalculator:
             result = cls.convert_mass(value, from_unit, to_unit)
         elif quantity_type == "Temperature":
             result = cls.convert_temperature(value, from_unit, to_unit)
+        elif quantity_type == "Energy":
+            if needs_photoperiod and photoperiod_hours <= 0:
+                st.info("Set photoperiod above zero for light-energy conversions.")
+            else:
+                result = cls.convert_light_energy(value, from_unit, to_unit, photoperiod_hours)
 
         if result is not None:
             st.markdown("### Result")
