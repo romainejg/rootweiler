@@ -57,7 +57,6 @@ class DLICalculator:
                 key="dli_measured_location",
             )
         col1, col2 = st.columns(2)
-        col1, col2 = st.columns(2)
 
         with col1:
             if light_input_mode == cls.PPFD_MODE:
