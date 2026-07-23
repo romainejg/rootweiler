@@ -1330,7 +1330,7 @@ class MGSLettuceCalculator:
     _MIN_LAYOUT_SEGMENT_M = 0.1
     # Lettuce biology limits for ellipse deformation
     _ELLIPSE_MIN_LONG_DIAM_M = 0.01   # 1 cm minimum longitudinal (along-gutter) diameter
-    _ELLIPSE_MAX_LAT_DIAM_M  = 0.60   # 60 cm maximum lateral (across-gutter) diameter (fallback)
+    _ELLIPSE_MAX_LAT_DIAM_M  = 0.60   # 60 cm maximum lateral diameter (fallback when zone_spacing_m is unavailable)
     # ── Horizontal allowance ─────────────────────────────────────────────────
     # Controls how far each plant ellipse may expand across the gutter (x direction).
     # The cap is:  ax ≤ (c-c spacing / 2) × _ELLIPSE_LATERAL_ALLOWANCE_FACTOR
@@ -1464,7 +1464,7 @@ class MGSLettuceCalculator:
         cls,
         natural_diameter_m: float,
         plant_spacing_m: float,
-        zone_spacing_m: float = 0.0,
+        zone_spacing_m: float | None = None,
     ) -> tuple[float, float, float]:
         """
         Compute area-preserving ellipse semi-axes for a lettuce plant under crowding.
@@ -1509,9 +1509,9 @@ class MGSLettuceCalculator:
         ax_ideal = (r * r) / ay
 
         # Cap lateral expansion at the c-c half-spacing × allowance factor to prevent
-        # overlap between adjacent gutters.  When zone_spacing_m is unavailable,
+        # overlap between adjacent gutters.  When zone_spacing_m is not provided,
         # fall back to the absolute biology ceiling.
-        if zone_spacing_m > 0:
+        if zone_spacing_m is not None:
             ax_cap = (zone_spacing_m / 2.0) * cls._ELLIPSE_LATERAL_ALLOWANCE_FACTOR
         else:
             ax_cap = cls._ELLIPSE_MAX_LAT_DIAM_M / 2.0
