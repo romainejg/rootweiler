@@ -1190,12 +1190,11 @@ class MGSLettuceCalculator:
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
     _INCH_TO_M = 0.0254
     _DAYS_PER_INCH_GROWTH = 7.0  # crop diameter grows 1 inch per 7 days (linear)
-    # Visual layout sizing constants used to convert data-unit diameters to marker pixels.
-    # Figure height is set to 380 px with margins t=30, b=10 → ~340 px usable height.
-    # The y data range spans gutter_length_m * 1.3 (range=[-0.1, 1.2] × gutter_length_m).
-    _VIS_EFF_HEIGHT_PX = 340.0
-    _VIS_Y_RANGE_FACTOR = 1.3
-    _MIN_MARKER_SIZE_PX = 4.0  # smallest marker diameter (px) for plant circle traces
+    _VIS_Y_RANGE_FACTOR = 1.3  # y data range factor: range spans gutter_length_m * 1.3
+    _N_GUTTERS_VISUAL = 3      # representative gutters drawn per zone in the layout visual
+    # Cap plant circles per gutter at 60: keeps shape count ≤ ~1 080 for a 6-zone system
+    # (3 gutters × 60 plants × 6 zones) while still giving a clear density impression.
+    _MAX_VISUAL_PLANTS = 60
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1362,11 +1361,6 @@ class MGSLettuceCalculator:
 
         fig = go.Figure()
 
-        # Estimate pixel-to-metre ratio for marker sizing.
-        # See class constants _VIS_EFF_HEIGHT_PX and _VIS_Y_RANGE_FACTOR for details.
-        _y_data_range = gutter_length_m * cls._VIS_Y_RANGE_FACTOR
-        px_per_m = cls._VIS_EFF_HEIGHT_PX / _y_data_range if _y_data_range > 0 else 100.0
-
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
 
@@ -1376,7 +1370,6 @@ class MGSLettuceCalculator:
                 continue
 
             zone_spacing_m = cls.to_meters(zi["spacing_val"], zi["spacing_unit"])
-            gutters_per_zone = max(1, int(round(zi["gutters_per_zone"])))
             seeds_per_m2 = cls.compute_seeds_per_m2(
                 gutter_length_m, zone_spacing_m, zi["seeds_per_gutter"]
             )
@@ -1384,7 +1377,7 @@ class MGSLettuceCalculator:
                 gutter_length_m, zi["seeds_per_gutter"]
             )
 
-            zone_width = gutter_width_m + max(0, gutters_per_zone - 1) * zone_spacing_m
+            zone_width = gutter_width_m + (cls._N_GUTTERS_VISUAL - 1) * zone_spacing_m
             color = palette[idx % len(palette)]
             name = zi["name"]
             zone_exit_day = cumulative_day + days
@@ -1409,20 +1402,15 @@ class MGSLettuceCalculator:
 
             gutter_centers = []
 
-            # Gutter rectangles inside the zone.
-            n_draw = gutters_per_zone
-            gutter_step = zone_spacing_m if n_draw > 1 else 0.0
+            # Always draw _N_GUTTERS_VISUAL representative gutters per zone.
+            # Each gutter is spaced by zone_spacing_m and represents a different
+            # point in the zone's day range.
             first_center_x = x_cursor + gutter_width_m / 2.0
-            if n_draw > 1:
-                max_render_width = gutter_width_m + (n_draw - 1) * gutter_step
-                if max_render_width > zone_width and max_render_width > 0:
-                    compression = zone_width / max_render_width
-                    gutter_step *= compression
-                    first_center_x = x_cursor + (gutter_width_m * compression) / 2.0
+            gutter_step = zone_spacing_m
 
-            for g in range(n_draw):
-                gx = first_center_x + (g * gutter_step)
-                day_at_gutter = cumulative_day + ((g + 0.5) / max(1, n_draw)) * days
+            for g in range(cls._N_GUTTERS_VISUAL):
+                gx = first_center_x + g * gutter_step
+                day_at_gutter = cumulative_day + ((g + 0.5) / cls._N_GUTTERS_VISUAL) * days
                 gutter_diameter_m = cls._plant_diameter_m_from_day(day_at_gutter)
                 gutter_centers.append((gx, gutter_diameter_m))
                 fig.add_shape(
@@ -1435,43 +1423,28 @@ class MGSLettuceCalculator:
                     fillcolor="rgba(255,255,255,0.25)",
                 )
 
-            # Plant positions — one Scatter trace per zone instead of one shape
-            # per circle.  This is orders of magnitude faster for large plant counts
-            # because Plotly renders a single SVG element for the whole trace.
+            # Plant positions as data-coordinate circle shapes so that diameter is
+            # always accurate relative to gutter width and c-c spacing in the layout.
+            # Plant count is capped for visual clarity and render performance.
             if gutter_centers:
-                plants_to_draw = max(1, plants_per_gutter)
-                y_step = gutter_length_m / plants_to_draw
-
-                scatter_x: list = []
-                scatter_y: list = []
-                scatter_size: list = []
-
+                plants_to_draw = min(cls._MAX_VISUAL_PLANTS, plants_per_gutter)
+                y_positions = [
+                    gutter_length_m * (p + 0.5) / plants_to_draw
+                    for p in range(plants_to_draw)
+                ]
                 for gx, gutter_diameter_m in gutter_centers:
-                    size_px = max(cls._MIN_MARKER_SIZE_PX, gutter_diameter_m * px_per_m)
-                    for p in range(plants_to_draw):
-                        scatter_x.append(gx)
-                        scatter_y.append((p + 0.5) * y_step)
-                        scatter_size.append(size_px)
-
-                if scatter_x:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=scatter_x,
-                            y=scatter_y,
-                            mode="markers",
-                            marker=dict(
-                                symbol="circle-open",
-                                size=scatter_size,
-                                sizemode="diameter",
-                                color=color,
-                                opacity=0.7,
+                    r = gutter_diameter_m / 2.0
+                    if r > 0:
+                        for cy in y_positions:
+                            fig.add_shape(
+                                type="circle",
+                                x0=gx - r,
+                                y0=cy - r,
+                                x1=gx + r,
+                                y1=cy + r,
                                 line=dict(color=color, width=1),
-                            ),
-                            hoverinfo="skip",
-                            showlegend=False,
-                            name=name,
-                        )
-                    )
+                                opacity=0.65,
+                            )
 
             # Zone label annotation (centred in the zone rectangle)
             mid_x = x_cursor + zone_width / 2
@@ -1515,6 +1488,15 @@ class MGSLettuceCalculator:
                 )
 
             x_cursor += zone_width
+
+            # Add a gap between zones equal to the next zone's c-c spacing so that
+            # the visual distance from the last gutter of this zone to the first
+            # gutter of the next zone reflects the new zone's spacing.
+            if idx < len(zone_inputs) - 1:
+                next_zi = zone_inputs[idx + 1]
+                next_spacing_m = cls.to_meters(next_zi["spacing_val"], next_zi["spacing_unit"])
+                x_cursor += next_spacing_m
+
             cumulative_day += days
 
         total_width = x_cursor
@@ -1557,9 +1539,12 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Plant circles represent crop diameter growing linearly by day: "
-            "day 0 = 0 in, day 7 = 1 in, day 14 = 2 in, etc. "
-            "Gutter rectangles reflect actual gutter width."
+            f"Each zone shows {cls._N_GUTTERS_VISUAL} representative gutters spread evenly across "
+            "the zone's day range. Plant circles are drawn at true data-unit diameter "
+            "(day 0 = 0 in, day 7 = 1 in, day 14 = 2 in, etc.) so they are always "
+            f"accurate relative to gutter width and c-c spacing. "
+            f"Up to {cls._MAX_VISUAL_PLANTS} plants shown per gutter "
+            "(actual gutter count and plant totals are shown in the table above)."
         )
 
     @classmethod
