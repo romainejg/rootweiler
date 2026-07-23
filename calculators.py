@@ -1329,8 +1329,16 @@ class MGSLettuceCalculator:
     _VIS_Y_TOP_PADDING_FACTOR = 1.25
     _MIN_LAYOUT_SEGMENT_M = 0.1
     # Lettuce biology limits for ellipse deformation
-    _ELLIPSE_MIN_LONG_DIAM_M = 0.08   # 8 cm minimum longitudinal (along-gutter) diameter
-    _ELLIPSE_MAX_LAT_DIAM_M  = 0.40   # 40 cm maximum lateral (across-gutter) diameter
+    _ELLIPSE_MIN_LONG_DIAM_M = 0.01   # 1 cm minimum longitudinal (along-gutter) diameter
+    _ELLIPSE_MAX_LAT_DIAM_M  = 0.60   # 60 cm maximum lateral diameter (fallback when zone_spacing_m is unavailable)
+    # ── Horizontal allowance ─────────────────────────────────────────────────
+    # Controls how far each plant ellipse may expand across the gutter (x direction).
+    # The cap is:  ax ≤ (c-c spacing / 2) × _ELLIPSE_LATERAL_ALLOWANCE_FACTOR
+    #   1.0 → ellipse edges exactly touch the mid-point between adjacent gutters
+    #   < 1.0 → gap between adjacent ellipses (e.g. 0.9 = 10 % breathing room)
+    #   > 1.0 → intentional overlap between adjacent gutters' plant shapes
+    # Increase this value if you need more horizontal stretch in the visualization.
+    _ELLIPSE_LATERAL_ALLOWANCE_FACTOR = 0.95
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1456,22 +1464,25 @@ class MGSLettuceCalculator:
         cls,
         natural_diameter_m: float,
         plant_spacing_m: float,
+        zone_spacing_m: float | None = None,
     ) -> tuple[float, float, float]:
         """
         Compute area-preserving ellipse semi-axes for a lettuce plant under crowding.
 
         Coordinate convention (matches the diagram):
         - y direction: along the gutter  (plant_spacing_m between adjacent plants)
-        - x direction: across the gutter (gutterSpacing between parallel gutters)
+        - x direction: across the gutter (zone_spacing_m = c-c between gutters)
 
         Deformation rules:
         1. No longitudinal overlap (natural_diameter <= plant_spacing): circle, ax = ay = r.
-        2. Overlap detected: compress ay toward plant_spacing / 2, expand ax to keep
+        2. Overlap detected: compress ay to plant_spacing / 2, expand ax to keep
            the projected area equal to the natural circle area (pi * r²).
-        3. ay is floored at _ELLIPSE_MIN_LONG_DIAM_M / 2 (biology minimum).
-        4. ax is capped at _ELLIPSE_MAX_LAT_DIAM_M / 2 (biology maximum).
+        3. ay is floored at _ELLIPSE_MIN_LONG_DIAM_M / 2 (keeps ellipse visible).
+        4. ax is capped at (zone_spacing_m / 2) × _ELLIPSE_LATERAL_ALLOWANCE_FACTOR
+           when zone_spacing_m is provided, otherwise at _ELLIPSE_MAX_LAT_DIAM_M / 2.
+           Adjust _ELLIPSE_LATERAL_ALLOWANCE_FACTOR for more/less horizontal stretch.
         5. crowding_score (0–100 %) = fraction of natural area that could not be
-           preserved once one or both biology limits are hit.
+           preserved once one or both limits are hit.
 
         Returns:
             (ax, ay, crowding_score)
@@ -1482,21 +1493,30 @@ class MGSLettuceCalculator:
 
         natural_area = math.pi * r * r
 
-        # Target longitudinal semi-axis: compress to half the plant spacing when crowded.
+        # Longitudinal (along-gutter) semi-axis: compress to half the plant spacing
+        # when plants crowd each other along the gutter.
         if plant_spacing_m > 0 and natural_diameter_m > plant_spacing_m:
             ay_target = plant_spacing_m / 2.0
         else:
             ay_target = r
 
-        # Apply biology floor (never compress below minimum).
+        # Apply minimum floor so the ellipse stays visible.
         ay = max(ay_target, cls._ELLIPSE_MIN_LONG_DIAM_M / 2.0)
         # Never expand along gutter beyond the natural radius.
         ay = min(ay, r)
 
-        # Expand laterally to preserve area: ax = r² / ay.
+        # Lateral (across-gutter) semi-axis: expand to preserve area.
         ax_ideal = (r * r) / ay
-        # Apply biology ceiling.
-        ax = min(ax_ideal, cls._ELLIPSE_MAX_LAT_DIAM_M / 2.0)
+
+        # Cap lateral expansion at the c-c half-spacing × allowance factor to prevent
+        # overlap between adjacent gutters.  When zone_spacing_m is not provided,
+        # fall back to the absolute biology ceiling.
+        if zone_spacing_m is not None:
+            ax_cap = (zone_spacing_m / 2.0) * cls._ELLIPSE_LATERAL_ALLOWANCE_FACTOR
+        else:
+            ax_cap = cls._ELLIPSE_MAX_LAT_DIAM_M / 2.0
+
+        ax = min(ax_ideal, ax_cap)
         # Never shrink lateral below natural radius.
         ax = max(ax, r)
 
@@ -1632,7 +1652,7 @@ class MGSLettuceCalculator:
             zone_exit_diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
             zone_exit_diameter_in = zone_exit_diameter_m / cls._INCH_TO_M
             _, _, zone_exit_crowding_pct = cls._plant_ellipse_axes(
-                zone_exit_diameter_m, seed_spacing_m
+                zone_exit_diameter_m, seed_spacing_m, zone_spacing_m
             )
             # A zone can intentionally have zero plants after losses/transplants.
             plants_per_gutter = cls._plants_per_gutter_count(zi["seeds_per_gutter"])
@@ -1689,7 +1709,7 @@ class MGSLettuceCalculator:
                 )
                 for gx, gutter_diameter_m in gutter_centers:
                     ax, ay, crowding_score = cls._plant_ellipse_axes(
-                        gutter_diameter_m, seed_spacing_m
+                        gutter_diameter_m, seed_spacing_m, zone_spacing_m
                     )
                     if ax > 0 and ay > 0:
                         fill = (
@@ -1833,11 +1853,9 @@ class MGSLettuceCalculator:
             "5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. "
             "Plant shapes are area-preserving ellipses: when plants overlap along the "
             "gutter (y direction) the shape compresses longitudinally and expands "
-            "laterally (x direction) to keep the projected canopy area constant. "
-            f"Biology limits: minimum longitudinal diameter "
-            f"{MGSLettuceCalculator._ELLIPSE_MIN_LONG_DIAM_M * 100:.0f} cm, "
-            f"maximum lateral diameter "
-            f"{MGSLettuceCalculator._ELLIPSE_MAX_LAT_DIAM_M * 100:.0f} cm. "
+            "laterally (x direction) up to "
+            f"{MGSLettuceCalculator._ELLIPSE_LATERAL_ALLOWANCE_FACTOR * 100:.0f}% "
+            "of the half c-c spacing. "
             "A red fill and non-zero crowding score appear once these limits prevent "
             "full area recovery."
         )
