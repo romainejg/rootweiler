@@ -1562,13 +1562,13 @@ class MGSLettuceCalculator:
         plants_per_gutter: int,
         max_visualized_plants: int | None = None,
     ) -> tuple[float, int]:
-        """Return the gutter segment length needed to visualize up to N plants."""
+        """Return the fixed rendered gutter length and visualized plant count."""
         if gutter_length_m <= 0 or plants_per_gutter <= 0:
             return 0.0, 0
         if max_visualized_plants is None:
             max_visualized_plants = cls._MAX_VISUALIZED_PLANTS
         visualized_plants = min(plants_per_gutter, max_visualized_plants)
-        visualized_length_m = gutter_length_m * (visualized_plants / plants_per_gutter)
+        visualized_length_m = gutter_length_m
         return visualized_length_m, visualized_plants
 
     @classmethod
@@ -1605,26 +1605,7 @@ class MGSLettuceCalculator:
 
         fig = go.Figure()
 
-        rendered_lengths = []
-        for zi in zone_inputs:
-            if zi["days_in_zone"] <= 0:
-                continue
-            plants_per_gutter = cls._plants_per_gutter_count(zi["seeds_per_gutter"])
-            if plants_per_gutter <= 0:
-                continue
-            rendered_length_m, _visualized_plants = cls._visualized_gutter_segment(
-                gutter_length_m, plants_per_gutter
-            )
-            if rendered_length_m > 0:
-                # Only visible gutter segments affect the y-axis scale; zero-plant
-                # zones still participate in spacing and labeling below.
-                rendered_lengths.append(rendered_length_m)
-
-        max_rendered_gutter_length_m = (
-            max(rendered_lengths)
-            if rendered_lengths
-            else max(gutter_length_m * 0.05, cls._MIN_LAYOUT_SEGMENT_M)
-        )
+        max_rendered_gutter_length_m = max(gutter_length_m, cls._MIN_LAYOUT_SEGMENT_M)
         label_y = -max_rendered_gutter_length_m * cls._LABEL_Y_OFFSET_FACTOR
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
@@ -1705,8 +1686,8 @@ class MGSLettuceCalculator:
             # prevent full area recovery (crowding_score > 0).
             if gutter_centers and visualized_plants > 0:
                 y_positions = cls._all_y_positions(
-                    rendered_gutter_length_m, visualized_plants
-                )
+                    rendered_gutter_length_m, plants_per_gutter
+                )[:visualized_plants]
                 for gx, gutter_diameter_m in gutter_centers:
                     ax, ay, crowding_score = cls._plant_ellipse_axes(
                         gutter_diameter_m, seed_spacing_m, zone_spacing_m
@@ -1810,7 +1791,7 @@ class MGSLettuceCalculator:
                 range=[-total_width * 0.02, total_width * 1.05],
             ),
             yaxis=dict(
-                title="Visualized gutter segment (m)",
+                title="Gutter length direction (m)",
                 showticklabels=False,
                 showgrid=False,
                 zeroline=False,
@@ -1848,8 +1829,8 @@ class MGSLettuceCalculator:
             )
         st.caption(
             "Each zone shows one rendered gutter per day in the zone. Each gutter is "
-            "truncated to the segment needed to display up to 10 plants while preserving "
-            "the true seed spacing for that zone. Plant diameter uses D(t) = "
+            "drawn at full length and displays up to 10 plant positions using that zone's "
+            "true seed spacing. Plant diameter uses D(t) = "
             "5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. "
             "Plant shapes are area-preserving ellipses: when plants overlap along the "
             "gutter (y direction) the shape compresses longitudinally and expands "
