@@ -1416,7 +1416,7 @@ class MGSLettuceCalculator:
 
             for g in range(n_day_gutters):
                 gx = first_center_x + g * gutter_step
-                day_at_gutter = cumulative_day + min(days, float(g))
+                day_at_gutter = cumulative_day + float(g)
                 gutter_diameter_m = cls._plant_diameter_m_from_day(day_at_gutter)
                 gutter_centers.append((gx, gutter_diameter_m))
                 fig.add_shape(
@@ -1543,7 +1543,7 @@ class MGSLettuceCalculator:
         st.caption(
             "Each zone shows one rendered gutter per day in the zone. Plant circles "
             "are rendered for all plants per gutter at full count, and plant diameter "
-            "uses D(t) = 5 + 295 / (1 + exp(-0.148 × (t - 29.5))) with t in days. "
+            "uses D(t) = 5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. "
             "Table overlap metrics remain analytic and are the source of truth."
         )
 
