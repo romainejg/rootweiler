@@ -1392,6 +1392,8 @@ class MGSLettuceCalculator:
             if zi["days_in_zone"] <= 0:
                 continue
             plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
+            if plants_per_gutter <= 0:
+                continue
             rendered_length_m, _ = cls._visualized_gutter_segment(
                 gutter_length_m, plants_per_gutter
             )
@@ -1405,6 +1407,7 @@ class MGSLettuceCalculator:
 
         x_cursor = 0.0  # running x position as zones are placed left-to-right
         cumulative_day = 0.0
+        overlapping_spacing_detected = False
 
         for idx, zi in enumerate(zone_inputs):
             days = zi["days_in_zone"]
@@ -1430,9 +1433,13 @@ class MGSLettuceCalculator:
             overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
             max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
             plants_per_gutter = max(0, int(round(zi["seeds_per_gutter"])))
-            rendered_gutter_length_m, visualized_plants = (
-                cls._visualized_gutter_segment(gutter_length_m, plants_per_gutter)
-            )
+            if plants_per_gutter > 0:
+                rendered_gutter_length_m, visualized_plants = (
+                    cls._visualized_gutter_segment(gutter_length_m, plants_per_gutter)
+                )
+            else:
+                rendered_gutter_length_m = 0.0
+                visualized_plants = 0
 
             # Zone rectangle (filled background)
             fig.add_shape(
@@ -1537,6 +1544,8 @@ class MGSLettuceCalculator:
                 next_spacing_m = cls.to_meters(
                     next_zi["spacing_val"], next_zi["spacing_unit"]
                 )
+                if next_spacing_m < gutter_width_m:
+                    overlapping_spacing_detected = True
                 x_cursor += next_spacing_m - gutter_width_m
 
             cumulative_day += days
@@ -1583,6 +1592,12 @@ class MGSLettuceCalculator:
         )
 
         st.plotly_chart(fig, use_container_width=True)
+        if overlapping_spacing_detected:
+            st.caption(
+                "Some zones use c-c spacing smaller than the gutter width, so the "
+                "layout intentionally renders gutter overlap to preserve the "
+                "requested center-to-center spacing."
+            )
         st.caption(
             "Each zone shows one rendered gutter per day in the zone. Each gutter is "
             "truncated to the segment needed to display up to 10 plants while preserving "
