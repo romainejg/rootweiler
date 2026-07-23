@@ -1351,8 +1351,12 @@ class MGSLettuceCalculator:
         if n <= cap:
             return [gutter_length_m * (i + 0.5) / n for i in range(n)]
         # Uniform stride: linspace over index space, rounded to integer indices.
+        # Guard for cap == 1: just return the first full-grid position.
+        if cap == 1:
+            return [gutter_length_m * 0.5 / n]
         indices = [round(i * (n - 1) / (cap - 1)) for i in range(cap)]
-        # Deduplicate while preserving monotonic order (rare but safe for n close to cap).
+        # Deduplicate while preserving monotonic order (can occur when cap is large
+        # relative to n, though the n > cap guard above makes this very rare).
         seen: set[int] = set()
         unique: list[int] = []
         for idx in indices:
