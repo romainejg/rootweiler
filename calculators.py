@@ -53,7 +53,7 @@ class DLICalculator:
             )
 
         col1, col2 = st.columns(2)
-        transmissivity_pct = 70.0
+        transmissivity_pct = 100.0
 
         with col1:
             if light_input_mode == "PPFD (µmol·m⁻²·s⁻¹)":
@@ -105,6 +105,7 @@ class DLICalculator:
                     key="dli_hours",
                 )
             else:
+                # Solar radiation input is already a daily total (kWh·m⁻²·day⁻¹).
                 hours = 24.0
 
         transmissivity_factor = transmissivity_pct / 100.0
@@ -123,7 +124,7 @@ class DLICalculator:
 
         if dli > 0:
             st.markdown("### Result")
-            if measured_location == "Outdoor":
+            if measured_location == "Outdoor" and transmissivity_pct < 100.0:
                 st.write(f"Applied transmissivity: **{transmissivity_pct:.0f}%**")
             if light_input_mode == "PAR (W·m⁻²)":
                 st.write(f"Canopy PAR: **{par_canopy:.1f} W·m⁻²**")
@@ -1169,7 +1170,7 @@ class UnitConverterCalculator:
         photoperiod_hours: float,
     ) -> float:
         if photoperiod_hours <= 0:
-            return 0.0
+            raise ValueError("Photoperiod must be greater than zero for light-energy conversions.")
 
         if from_unit == "DLI (mol·m⁻²·day⁻¹)":
             dli = value
@@ -1243,7 +1244,7 @@ class UnitConverterCalculator:
             )
             photoperiod_hours = st.number_input(
                 "Photoperiod (hours per day)",
-                min_value=0.1,
+                min_value=0.0,
                 max_value=24.0,
                 value=16.0,
                 step=0.5,
@@ -1264,7 +1265,10 @@ class UnitConverterCalculator:
         elif quantity_type == "Temperature":
             result = cls.convert_temperature(value, from_unit, to_unit)
         elif quantity_type == "Energy":
-            result = cls.convert_light_energy(value, from_unit, to_unit, photoperiod_hours)
+            if photoperiod_hours <= 0:
+                st.info("Set photoperiod above zero for light-energy conversions.")
+            else:
+                result = cls.convert_light_energy(value, from_unit, to_unit, photoperiod_hours)
 
         if result is not None:
             st.markdown("### Result")
