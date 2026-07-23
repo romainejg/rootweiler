@@ -1328,6 +1328,9 @@ class MGSLettuceCalculator:
     _VIS_Y_BOTTOM_PADDING_FACTOR = 0.55
     _VIS_Y_TOP_PADDING_FACTOR = 1.25
     _MIN_LAYOUT_SEGMENT_M = 0.1
+    # Lettuce biology limits for ellipse deformation
+    _ELLIPSE_MIN_LONG_DIAM_M = 0.08   # 8 cm minimum longitudinal (along-gutter) diameter
+    _ELLIPSE_MAX_LAT_DIAM_M  = 0.40   # 40 cm maximum lateral (across-gutter) diameter
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1447,6 +1450,61 @@ class MGSLettuceCalculator:
         if circle_area <= 0:
             return 0.0
         return max(0.0, min(100.0, (overlap_area / circle_area) * 100.0))
+
+    @classmethod
+    def _plant_ellipse_axes(
+        cls,
+        natural_diameter_m: float,
+        plant_spacing_m: float,
+    ) -> tuple[float, float, float]:
+        """
+        Compute area-preserving ellipse semi-axes for a lettuce plant under crowding.
+
+        Coordinate convention (matches the diagram):
+        - y direction: along the gutter  (plant_spacing_m between adjacent plants)
+        - x direction: across the gutter (gutterSpacing between parallel gutters)
+
+        Deformation rules:
+        1. No longitudinal overlap (natural_diameter <= plant_spacing): circle, ax = ay = r.
+        2. Overlap detected: compress ay toward plant_spacing / 2, expand ax to keep
+           the projected area equal to the natural circle area (pi * r²).
+        3. ay is floored at _ELLIPSE_MIN_LONG_DIAM_M / 2 (biology minimum).
+        4. ax is capped at _ELLIPSE_MAX_LAT_DIAM_M / 2 (biology maximum).
+        5. crowding_score (0–100 %) = fraction of natural area that could not be
+           preserved once one or both biology limits are hit.
+
+        Returns:
+            (ax, ay, crowding_score)
+        """
+        r = natural_diameter_m / 2.0
+        if r <= 1e-12:
+            return 0.0, 0.0, 0.0
+
+        natural_area = math.pi * r * r
+
+        # Target longitudinal semi-axis: compress to half the plant spacing when crowded.
+        if plant_spacing_m > 0 and natural_diameter_m > plant_spacing_m:
+            ay_target = plant_spacing_m / 2.0
+        else:
+            ay_target = r
+
+        # Apply biology floor (never compress below minimum).
+        ay = max(ay_target, cls._ELLIPSE_MIN_LONG_DIAM_M / 2.0)
+        # Never expand along gutter beyond the natural radius.
+        ay = min(ay, r)
+
+        # Expand laterally to preserve area: ax = r² / ay.
+        ax_ideal = (r * r) / ay
+        # Apply biology ceiling.
+        ax = min(ax_ideal, cls._ELLIPSE_MAX_LAT_DIAM_M / 2.0)
+        # Never shrink lateral below natural radius.
+        ax = max(ax, r)
+
+        # Crowding score: residual area fraction that could not be preserved.
+        achieved_area = math.pi * ax * ay
+        crowding_score = max(0.0, min(100.0, (1.0 - achieved_area / natural_area) * 100.0))
+
+        return ax, ay, crowding_score
 
     @staticmethod
     def _week_from_day(day_number: float) -> int:
@@ -1573,9 +1631,9 @@ class MGSLettuceCalculator:
             zone_exit_day = cumulative_day + days
             zone_exit_diameter_m = cls._plant_diameter_m_from_day(zone_exit_day)
             zone_exit_diameter_in = zone_exit_diameter_m / cls._INCH_TO_M
-            overlap_cc_pct = cls._pair_overlap_pct(zone_spacing_m, zone_exit_diameter_m)
-            overlap_ss_pct = cls._pair_overlap_pct(seed_spacing_m, zone_exit_diameter_m)
-            max_canopy_overlap_pct = max(overlap_cc_pct, overlap_ss_pct)
+            _, _, zone_exit_crowding_pct = cls._plant_ellipse_axes(
+                zone_exit_diameter_m, seed_spacing_m
+            )
             # A zone can intentionally have zero plants after losses/transplants.
             plants_per_gutter = cls._plants_per_gutter_count(zi["seeds_per_gutter"])
             if plants_per_gutter > 0:
@@ -1620,24 +1678,38 @@ class MGSLettuceCalculator:
                     fillcolor="rgba(255,255,255,0.25)",
                 )
 
-            # Plant positions as data-coordinate circle shapes so diameter/spacing
-            # remain geometrically accurate on true full plant counts per gutter.
-            # Table overlap metrics remain analytic and are the source of truth.
+            # Plant positions as data-coordinate ellipse shapes.
+            # When plants overlap along the gutter, the ellipse compresses
+            # longitudinally (y) and expands laterally (x) to preserve the
+            # natural canopy area.  A reddish fill appears once biology limits
+            # prevent full area recovery (crowding_score > 0).
             if gutter_centers and visualized_plants > 0:
                 y_positions = cls._all_y_positions(
                     rendered_gutter_length_m, visualized_plants
                 )
                 for gx, gutter_diameter_m in gutter_centers:
-                    r = gutter_diameter_m / 2.0
-                    if r > 0:
+                    ax, ay, crowding_score = cls._plant_ellipse_axes(
+                        gutter_diameter_m, seed_spacing_m
+                    )
+                    if ax > 0 and ay > 0:
+                        fill = (
+                            f"rgba(220,50,50,{0.15 + 0.40 * crowding_score / 100.0:.2f})"
+                            if crowding_score > 0
+                            else "rgba(255,255,255,0)"
+                        )
                         for cy in y_positions:
+                            # Plotly's "circle" type inscribes the shape in
+                            # its bounding box, so different ax / ay values
+                            # produce a true ellipse (there is no "ellipse"
+                            # type in Plotly shapes).
                             fig.add_shape(
                                 type="circle",
-                                x0=gx - r,
-                                y0=cy - r,
-                                x1=gx + r,
-                                y1=cy + r,
+                                x0=gx - ax,
+                                y0=cy - ay,
+                                x1=gx + ax,
+                                y1=cy + ay,
                                 line=dict(color=color, width=1),
+                                fillcolor=fill,
                                 opacity=0.65,
                             )
 
@@ -1648,7 +1720,7 @@ class MGSLettuceCalculator:
                 f"{days:.0f} days<br>"
                 f"{seeds_per_m2:.1f} plants/m²<br>"
                 f"c-c: {zone_spacing_m * 100:.1f} cm | s-s: {seed_spacing_m * 100:.1f} cm<br>"
-                f"overlap score: {max_canopy_overlap_pct:.1f}%<br>"
+                f"crowding score: {zone_exit_crowding_pct:.1f}%<br>"
                 f"diameter: {zone_exit_diameter_in:.0f} in"
             )
             fig.add_annotation(
@@ -1758,8 +1830,16 @@ class MGSLettuceCalculator:
             "Each zone shows one rendered gutter per day in the zone. Each gutter is "
             "truncated to the segment needed to display up to 10 plants while preserving "
             "the true seed spacing for that zone. Plant diameter uses D(t) = "
-            "5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. Table overlap "
-            "metrics remain analytic and are the source of truth."
+            "5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. "
+            "Plant shapes are area-preserving ellipses: when plants overlap along the "
+            "gutter (y direction) the shape compresses longitudinally and expands "
+            "laterally (x direction) to keep the projected canopy area constant. "
+            f"Biology limits: minimum longitudinal diameter "
+            f"{MGSLettuceCalculator._ELLIPSE_MIN_LONG_DIAM_M * 100:.0f} cm, "
+            f"maximum lateral diameter "
+            f"{MGSLettuceCalculator._ELLIPSE_MAX_LAT_DIAM_M * 100:.0f} cm. "
+            "A red fill and non-zero crowding score appear once these limits prevent "
+            "full area recovery."
         )
 
     @classmethod
