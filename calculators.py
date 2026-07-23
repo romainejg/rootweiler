@@ -1121,11 +1121,11 @@ class UnitConverterCalculator:
 
     LIGHT_ENERGY_UNITS = [
         "DLI (mol·m⁻²·day⁻¹)",
-        "PPFD (µmol·m⁻²·s⁻¹)",
-        "PAR (W·m⁻²)",
-        "Solar radiation (kWh·m⁻²·day⁻¹)",
+        DLICalculator.PPFD_MODE,
+        DLICalculator.PAR_MODE,
+        DLICalculator.SOLAR_MODE,
     ]
-    PHOTOPERIOD_REQUIRED_UNITS = {"PPFD (µmol·m⁻²·s⁻¹)", "PAR (W·m⁻²)"}
+    PHOTOPERIOD_REQUIRED_UNITS = {DLICalculator.PPFD_MODE, DLICalculator.PAR_MODE}
 
     @staticmethod
     def convert_length(value: float, from_unit: str, to_unit: str) -> float:
@@ -1186,26 +1186,26 @@ class UnitConverterCalculator:
 
         if from_unit == "DLI (mol·m⁻²·day⁻¹)":
             dli = value
-        elif from_unit == "PPFD (µmol·m⁻²·s⁻¹)":
+        elif from_unit == DLICalculator.PPFD_MODE:
             dli = DLICalculator.compute_dli(value, photoperiod_hours)
-        elif from_unit == "PAR (W·m⁻²)":
+        elif from_unit == DLICalculator.PAR_MODE:
             ppfd = value * DLICalculator.PAR_W_TO_PPFD
             dli = DLICalculator.compute_dli(ppfd, photoperiod_hours)
-        elif from_unit == "Solar radiation (kWh·m⁻²·day⁻¹)":
+        elif from_unit == DLICalculator.SOLAR_MODE:
             dli = value * DLICalculator.SOLAR_KWH_TO_DLI
         else:
-            dli = value
+            raise ValueError(f"Unsupported light-energy source unit: {from_unit}")
 
         if to_unit == "DLI (mol·m⁻²·day⁻¹)":
             return dli
-        elif to_unit == "PPFD (µmol·m⁻²·s⁻¹)":
+        elif to_unit == DLICalculator.PPFD_MODE:
             return dli * 1_000_000.0 / (photoperiod_hours * 3600.0)
-        elif to_unit == "PAR (W·m⁻²)":
+        elif to_unit == DLICalculator.PAR_MODE:
             ppfd = dli * 1_000_000.0 / (photoperiod_hours * 3600.0)
             return ppfd / DLICalculator.PAR_W_TO_PPFD
-        elif to_unit == "Solar radiation (kWh·m⁻²·day⁻¹)":
+        elif to_unit == DLICalculator.SOLAR_MODE:
             return dli / DLICalculator.SOLAR_KWH_TO_DLI
-        return dli
+        raise ValueError(f"Unsupported light-energy target unit: {to_unit}")
 
     @classmethod
     def render(cls):
