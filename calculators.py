@@ -10,7 +10,9 @@ class DLICalculator:
     """Daily Light Integral calculator."""
 
     PAR_W_TO_PPFD = 4.57
-    SOLAR_KWH_TO_DLI = 7.344  # Approximation: DLI ≈ Solar radiation (kWh·m⁻²·day⁻¹) × 7.344
+    # Approximation for outdoor global radiation under typical greenhouse assumptions:
+    # PAR fraction ≈ 45% of total solar energy and PAR efficacy ≈ 2.04 mol·MJ⁻¹.
+    SOLAR_KWH_TO_DLI = 7.344  # DLI ≈ Solar radiation (kWh·m⁻²·day⁻¹) × 7.344
 
     @staticmethod
     def compute_dli(ppfd: float, hours: float) -> float:
@@ -53,7 +55,7 @@ class DLICalculator:
             )
 
         col1, col2 = st.columns(2)
-        transmissivity_pct = 100.0
+        transmissivity_pct = 100.0  # Indoor canopy measurements are already transmitted values.
 
         with col1:
             if light_input_mode == "PPFD (µmol·m⁻²·s⁻¹)":
@@ -105,8 +107,7 @@ class DLICalculator:
                     key="dli_hours",
                 )
             else:
-                # Solar radiation input is already a daily total (kWh·m⁻²·day⁻¹).
-                hours = 24.0
+                hours = None
 
         transmissivity_factor = transmissivity_pct / 100.0
 
@@ -1240,7 +1241,8 @@ class UnitConverterCalculator:
         if quantity_type == "Energy":
             st.caption(
                 "DLI/PPFD/PAR conversions use the selected photoperiod. "
-                "Solar radiation conversion uses DLI ≈ kWh·m⁻²·day⁻¹ × 7.344."
+                "Solar radiation conversion uses DLI ≈ kWh·m⁻²·day⁻¹ × 7.344 "
+                "(assuming ~45% PAR fraction and ~2.04 mol·MJ⁻¹ PAR efficacy)."
             )
             photoperiod_hours = st.number_input(
                 "Photoperiod (hours per day)",
