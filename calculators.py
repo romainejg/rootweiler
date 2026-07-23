@@ -1189,12 +1189,8 @@ class MGSLettuceCalculator:
     _CFG_KEY = "mgs_density_cfg"
     _MIN_DAY_SCALE_M = 0.05  # fallback width scale (m/day) when pitch cannot be inferred
     _INCH_TO_M = 0.0254
-    _DAYS_PER_INCH_GROWTH = 7.0  # crop diameter grows 1 inch per 7 days (linear)
+    _MM_TO_M = 0.001
     _VIS_Y_RANGE_FACTOR = 1.3  # y data range factor: range spans gutter_length_m * 1.3
-    _N_GUTTERS_VISUAL = 3      # representative gutters drawn per zone in the layout visual
-    # Cap sampled circles per gutter; applied as index-based subsampling from
-    # the full seed-position grid so true spacing is preserved visually.
-    _MAX_VISUAL_PLANTS = 36
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1324,46 +1320,20 @@ class MGSLettuceCalculator:
 
     @classmethod
     def _plant_diameter_m_from_day(cls, day_number: float) -> float:
-        """Plant diameter in metres; linear by day (day 0 = 0 in, day 7 = 1 in, day 14 = 2 in)."""
-        diameter_in = max(0.0, day_number / cls._DAYS_PER_INCH_GROWTH)
-        return diameter_in * cls._INCH_TO_M
+        """Plant diameter in metres using D(t) in mm = 5 + 295 / (1 + exp(-0.148 * (t - 29.5)))."""
+        t = max(0.0, float(day_number))
+        diameter_mm = 5.0 + (295.0 / (1.0 + math.exp(-0.148 * (t - 29.5))))
+        return diameter_mm * cls._MM_TO_M
 
     @classmethod
-    def _sampled_y_positions(
+    def _all_y_positions(
         cls,
         gutter_length_m: float,
         plants_per_gutter: int,
-        max_visual_plants: int,
     ) -> list[float]:
-        """
-        Return y positions sampled from the conceptual full seed-position grid.
-
-        Full grid: full_y[i] = gutter_length_m * (i + 0.5) / plants_per_gutter
-
-        - If plants_per_gutter <= max_visual_plants, all positions are returned.
-        - Otherwise, approximately max_visual_plants positions are selected via
-          a uniform index stride across [0, plants_per_gutter-1], ensuring the
-          drawn circles reflect the true seed spacing (and therefore true overlap
-          cues) rather than artificially re-packed positions.
-        """
+        """Return all plant-center y positions from the full seed-position grid."""
         n = plants_per_gutter if plants_per_gutter >= 1 else 1
-        cap = max_visual_plants if max_visual_plants >= 1 else 1
-        if n <= cap:
-            return [gutter_length_m * (i + 0.5) / n for i in range(n)]
-        # Uniform stride: linspace over index space, rounded to integer indices.
-        # Guard for cap == 1: just return the first full-grid position.
-        if cap == 1:
-            return [gutter_length_m * 0.5 / n]
-        indices = [round(i * (n - 1) / (cap - 1)) for i in range(cap)]
-        # Deduplicate while preserving monotonic order. Rounding can produce
-        # repeated indices when n is only slightly greater than cap (e.g. n=37, cap=36).
-        seen: set[int] = set()
-        unique: list[int] = []
-        for idx in indices:
-            if idx not in seen:
-                seen.add(idx)
-                unique.append(idx)
-        return [gutter_length_m * (i + 0.5) / n for i in unique]
+        return [gutter_length_m * (i + 0.5) / n for i in range(n)]
 
     @classmethod
     def _render_system_visual(
@@ -1379,13 +1349,11 @@ class MGSLettuceCalculator:
         - X axis  → physical zone width (metres)
         - Y axis  → gutter length direction
         - Vertical gutter rectangles reflect gutter width and c-c spacing
-        - Circles on gutters represent plant position and diameter by week
+        - Circles on gutters represent plant position and diameter by day
 
-        Performance note: gutter rectangles and plant circles are rendered for all
-        _N_GUTTERS_VISUAL representative gutters. Plant positions are subsampled
-        from the full seed-position grid so displayed circles faithfully represent
-        true seed spacing (overlap cues remain accurate). The analytic overlap
-        metrics in the table are always the authoritative source of truth.
+        One gutter is rendered for each day in a zone (minimum 1 gutter).
+        Plant circles are rendered for all plants in each rendered gutter so
+        spacing reflects true plants-per-gutter values.
         """
         if gutter_length_m <= 0 or gutter_width_m <= 0:
             st.info("Enter valid gutter dimensions to see the layout.")
@@ -1416,7 +1384,8 @@ class MGSLettuceCalculator:
                 gutter_length_m, zi["seeds_per_gutter"]
             )
 
-            zone_width = gutter_width_m + (cls._N_GUTTERS_VISUAL - 1) * zone_spacing_m
+            n_day_gutters = max(1, int(math.ceil(days)))
+            zone_width = gutter_width_m + (n_day_gutters - 1) * zone_spacing_m
             color = palette[idx % len(palette)]
             name = zi["name"]
             zone_exit_day = cumulative_day + days
@@ -1441,15 +1410,13 @@ class MGSLettuceCalculator:
 
             gutter_centers = []
 
-            # Always draw _N_GUTTERS_VISUAL representative gutters per zone.
-            # Each gutter is spaced by zone_spacing_m and represents a different
-            # point in the zone's day range.
+            # Draw one gutter per day in-zone (minimum 1).
             first_center_x = x_cursor + gutter_width_m / 2.0
             gutter_step = zone_spacing_m
 
-            for g in range(cls._N_GUTTERS_VISUAL):
+            for g in range(n_day_gutters):
                 gx = first_center_x + g * gutter_step
-                day_at_gutter = cumulative_day + ((g + 0.5) / cls._N_GUTTERS_VISUAL) * days
+                day_at_gutter = cumulative_day + float(g)
                 gutter_diameter_m = cls._plant_diameter_m_from_day(day_at_gutter)
                 gutter_centers.append((gx, gutter_diameter_m))
                 fig.add_shape(
@@ -1463,15 +1430,10 @@ class MGSLettuceCalculator:
                 )
 
             # Plant positions as data-coordinate circle shapes so diameter/spacing
-            # remain geometrically accurate. Positions are subsampled from the full
-            # seed-position grid (preserving true spacing representation) and circles
-            # are rendered on all representative gutters so overlap between zones and
-            # across the day progression can be visually inspected.
+            # remain geometrically accurate on true full plant counts per gutter.
             # Table overlap metrics remain analytic and are the source of truth.
             if gutter_centers:
-                y_positions = cls._sampled_y_positions(
-                    gutter_length_m, plants_per_gutter, cls._MAX_VISUAL_PLANTS
-                )
+                y_positions = cls._all_y_positions(gutter_length_m, plants_per_gutter)
                 for gx, gutter_diameter_m in gutter_centers:
                     r = gutter_diameter_m / 2.0
                     if r > 0:
@@ -1579,14 +1541,10 @@ class MGSLettuceCalculator:
 
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            f"Each zone shows {cls._N_GUTTERS_VISUAL} representative gutters spread evenly across "
-            "the zone's day range. Plant circles are drawn at true data-unit diameter "
-            "(day 0 = 0 in, day 7 = 1 in, day 14 = 2 in, etc.) on all representative "
-            "gutters. When plants per gutter exceeds the display cap, circles are "
-            f"subsampled from the full seed-position grid (up to {cls._MAX_VISUAL_PLANTS} "
-            "per gutter) so spacing and overlap cues remain visually representative of "
-            "the original pattern. Table overlap metrics are always analytic and are the "
-            "source of truth (actual gutter count and plant totals are shown in the table above)."
+            "Each zone shows one rendered gutter per day in the zone. Plant circles "
+            "are rendered for all plants per gutter at full count, and plant diameter "
+            "uses D(t) = 5 + 295 / (1 + exp(-0.148 * (t - 29.5))) with t in days. "
+            "Table overlap metrics remain analytic and are the source of truth."
         )
 
     @classmethod
