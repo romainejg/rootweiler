@@ -1192,9 +1192,10 @@ class MGSLettuceCalculator:
     _DAYS_PER_INCH_GROWTH = 7.0  # crop diameter grows 1 inch per 7 days (linear)
     _VIS_Y_RANGE_FACTOR = 1.3  # y data range factor: range spans gutter_length_m * 1.3
     _N_GUTTERS_VISUAL = 3      # representative gutters drawn per zone in the layout visual
-    # Cap plant circles per gutter at 60: keeps shape count ≤ ~1 080 for a 6-zone system
-    # (3 gutters × 60 plants × 6 zones) while still giving a clear density impression.
-    _MAX_VISUAL_PLANTS = 60
+    _CIRCLE_GUTTER_INDEX = 1   # center representative gutter (0-based)
+    _MIN_VISUAL_PLANTS = 10
+    _MID_VISUAL_PLANTS = 20
+    _MAX_VISUAL_PLANTS = 36
 
     @classmethod
     def _cfg(cls) -> dict:
@@ -1329,6 +1330,17 @@ class MGSLettuceCalculator:
         return diameter_in * cls._INCH_TO_M
 
     @classmethod
+    def _plants_to_draw_for_overlap(cls, overlap_pct: float, plants_per_gutter: int) -> int:
+        """Adaptive plant sampling count for overlap visualization."""
+        if overlap_pct >= 40.0:
+            target = cls._MAX_VISUAL_PLANTS
+        elif overlap_pct >= 15.0:
+            target = cls._MID_VISUAL_PLANTS
+        else:
+            target = cls._MIN_VISUAL_PLANTS
+        return max(1, min(plants_per_gutter, target))
+
+    @classmethod
     def _render_system_visual(
         cls,
         zone_inputs: list,
@@ -1344,9 +1356,9 @@ class MGSLettuceCalculator:
         - Vertical gutter rectangles reflect gutter width and c-c spacing
         - Circles on gutters represent plant position and diameter by week
 
-        Performance note: plant positions are rendered as a single Scatter trace
-        per zone (marker symbols) rather than one shape per circle, which is
-        dramatically faster for large plant counts.
+        Performance note: gutter rectangles are still shown for three representative
+        gutters, while plant circles are rendered only on the center representative
+        gutter using adaptive sampling to reduce shape count.
         """
         if gutter_length_m <= 0 or gutter_width_m <= 0:
             st.info("Enter valid gutter dimensions to see the layout.")
@@ -1423,28 +1435,32 @@ class MGSLettuceCalculator:
                     fillcolor="rgba(255,255,255,0.25)",
                 )
 
-            # Plant positions as data-coordinate circle shapes so that diameter is
-            # always accurate relative to gutter width and c-c spacing in the layout.
-            # Plant count is capped for visual clarity and render performance.
+            # Plant positions as data-coordinate circle shapes so diameter remains
+            # accurate relative to gutter width and c-c spacing in the layout.
+            # For performance, circles are rendered only on the center representative
+            # gutter with adaptive sampling by overlap severity.
             if gutter_centers:
-                plants_to_draw = min(cls._MAX_VISUAL_PLANTS, plants_per_gutter)
+                plants_to_draw = cls._plants_to_draw_for_overlap(
+                    max_canopy_overlap_pct, plants_per_gutter
+                )
                 y_positions = [
                     gutter_length_m * (p + 0.5) / plants_to_draw
                     for p in range(plants_to_draw)
                 ]
-                for gx, gutter_diameter_m in gutter_centers:
-                    r = gutter_diameter_m / 2.0
-                    if r > 0:
-                        for cy in y_positions:
-                            fig.add_shape(
-                                type="circle",
-                                x0=gx - r,
-                                y0=cy - r,
-                                x1=gx + r,
-                                y1=cy + r,
-                                line=dict(color=color, width=1),
-                                opacity=0.65,
-                            )
+                center_idx = min(cls._CIRCLE_GUTTER_INDEX, len(gutter_centers) - 1)
+                gx, gutter_diameter_m = gutter_centers[center_idx]
+                r = gutter_diameter_m / 2.0
+                if r > 0:
+                    for cy in y_positions:
+                        fig.add_shape(
+                            type="circle",
+                            x0=gx - r,
+                            y0=cy - r,
+                            x1=gx + r,
+                            y1=cy + r,
+                            line=dict(color=color, width=1),
+                            opacity=0.65,
+                        )
 
             # Zone label annotation (centred in the zone rectangle)
             mid_x = x_cursor + zone_width / 2
@@ -1542,9 +1558,10 @@ class MGSLettuceCalculator:
             f"Each zone shows {cls._N_GUTTERS_VISUAL} representative gutters spread evenly across "
             "the zone's day range. Plant circles are drawn at true data-unit diameter "
             "(day 0 = 0 in, day 7 = 1 in, day 14 = 2 in, etc.) so they are always "
-            f"accurate relative to gutter width and c-c spacing. "
-            f"Up to {cls._MAX_VISUAL_PLANTS} plants shown per gutter "
-            "(actual gutter count and plant totals are shown in the table above)."
+            "accurate relative to gutter width and c-c spacing. Circles are shown on "
+            "the center representative gutter only, with adaptive sampling for faster "
+            "rendering (actual gutter count, plant totals, and overlap values are shown "
+            "in the table above)."
         )
 
     @classmethod
