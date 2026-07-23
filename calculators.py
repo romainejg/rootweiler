@@ -1344,7 +1344,7 @@ class MGSLettuceCalculator:
         cls,
         gutter_length_m: float,
         plants_per_gutter: int,
-        max_visualized_plants: int = _MAX_VISUALIZED_PLANTS,
+        max_visualized_plants: int = 10,
     ) -> tuple[float, int]:
         """Return the gutter segment length needed to visualize up to N plants."""
         if gutter_length_m <= 0 or plants_per_gutter <= 0:
@@ -1458,6 +1458,7 @@ class MGSLettuceCalculator:
             # Draw one gutter per day in-zone (minimum 1).
             first_center_x = x_cursor + gutter_width_m / 2.0
             gutter_step = zone_spacing_m
+            last_gutter_center_x = first_center_x + (n_day_gutters - 1) * gutter_step
 
             for g in range(n_day_gutters):
                 gx = first_center_x + g * gutter_step
@@ -1546,7 +1547,11 @@ class MGSLettuceCalculator:
                 )
                 if next_spacing_m < gutter_width_m:
                     overlapping_spacing_detected = True
-                x_cursor += next_spacing_m - gutter_width_m
+                x_cursor = (
+                    last_gutter_center_x
+                    + next_spacing_m
+                    - gutter_width_m / 2.0
+                )
 
             cumulative_day += days
 
