@@ -93,7 +93,7 @@ def effective_days_from_base_diameter(dBase: float) -> float:
     """
     Analytical inverse of base_diameter_from_effective_days.
 
-    Raises RangeError when dBase is at or beyond the logistic asymptotes.
+    Raises ValueError when dBase is at or beyond the logistic asymptotes.
     """
     if dBase <= DIAMETER_LOW or dBase >= DIAMETER_HIGH:
         raise ValueError(
@@ -724,7 +724,7 @@ proportional to occupied horizontal area (which scales as diameter squared).
 **Growth environment factor g**
 
 The speed factor is derived from a saturating approximation:
-g(I) = (1 − exp(−I/12)) / (1 − exp(−20/12)), normalised at DLI 20.
+g(I) = (1 − exp(−I/12)) / (1 − exp(−20/12)), normalized at DLI 20.
 These are initial calibration factors, not universally validated biological
 constants. DLI, temperature, CO₂, cultivar, humidity, nutrient management,
 spectrum, and photoperiod can all change actual crop timing.

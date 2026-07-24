@@ -73,6 +73,7 @@ W_MAX_CALIBRATED: float = 350.0  # g/plant
 # low DLI and diminishing growth response at higher DLI.  They are NOT
 # universally validated biological constants; recalibrate per cultivar and
 # facility as data become available.
+# Normalized at DLI 20 mol·m⁻²·day⁻¹.
 # ──────────────────────────────────────────────────────────────────────────────
 
 GROWTH_PRESETS: dict[str, dict] = {
