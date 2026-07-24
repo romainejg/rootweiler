@@ -14,6 +14,7 @@ import climate_analyzer
 import calculators
 from imaging_tools import ImagingToolsUI
 from nutrient_tools import NutrientToolsUI
+from lettuce_growth_model import LettuceGrowthModelCalculator
 
 
 # -----------------------
@@ -257,6 +258,7 @@ def sidebar_nav():
                 "Climate Analyzer",
                 "Unit Converter",
                 "PDF and Imaging",
+                "Lettuce Growth Model",
             ],
             index=0,
         )
@@ -421,6 +423,17 @@ def render_pdf_imaging():
 
 
 # -----------------------
+# Section: Lettuce Growth Model
+# -----------------------
+
+def render_lettuce_growth_model():
+    st.markdown("## Lettuce Growth Model")
+    tabs = st.tabs(["Growth Model"])
+    with tabs[0]:
+        LettuceGrowthModelCalculator.render()
+
+
+# -----------------------
 # Main app
 # -----------------------
 
@@ -448,6 +461,8 @@ def main():
         render_unit_converter()
     elif section == "PDF and Imaging":
         render_pdf_imaging()
+    elif section == "Lettuce Growth Model":
+        render_lettuce_growth_model()
     else:
         render_home()
 
